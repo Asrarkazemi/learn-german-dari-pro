@@ -62,6 +62,7 @@ import androidx.compose.ui.unit.sp
 import com.example.data.model.GrammarTopic
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
+import com.example.ui.components.GrammarSectionCard
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.SuccessGreen
 
@@ -201,55 +202,12 @@ fun GrammarTopicDetailScreen(
                 // Render all explanation sections
                 items(topic.sections.size, key = { "sec_$it" }) { index ->
                     val section = topic.sections[index]
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .testTag("grammar_section_card_$index"),
-                        shape = RoundedCornerShape(18.dp),
-                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                    ) {
-                        Column(modifier = Modifier.padding(18.dp)) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.fillMaxWidth()
-                            ) {
-                                Surface(
-                                    shape = CircleShape,
-                                    color = MaterialTheme.colorScheme.secondaryContainer,
-                                    modifier = Modifier.size(26.dp)
-                                ) {
-                                    Box(contentAlignment = Alignment.Center) {
-                                        Text(
-                                            text = "${index + 1}",
-                                            fontSize = 12.sp,
-                                            fontWeight = FontWeight.Bold,
-                                            color = MaterialTheme.colorScheme.onSecondaryContainer
-                                        )
-                                    }
-                                }
-                                Spacer(modifier = Modifier.width(10.dp))
-                                Text(
-                                    text = section.title,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 15.5.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.height(12.dp))
-                            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
-                            Spacer(modifier = Modifier.height(12.dp))
-
-                            Text(
-                                text = section.bodyDari,
-                                style = MaterialTheme.typography.bodyMedium,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                lineHeight = 25.sp,
-                                fontSize = 14.5.sp
-                            )
-                        }
-                    }
+                    GrammarSectionCard(
+                        sectionNumber = index + 1,
+                        title = section.title,
+                        bodyDari = section.bodyDari,
+                        modifier = Modifier.testTag("grammar_section_card_$index")
+                    )
                 }
 
                 // Section 2: Example Sentences (Numbered, Line-by-Line with Audio)

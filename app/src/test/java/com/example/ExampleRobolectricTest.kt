@@ -366,4 +366,24 @@ class ExampleRobolectricTest {
         progressManager.setPlaybackSpeed(1.0f)
         assertEquals(1.0f, ttsManager.getEffectiveSpeed(), 0.01f)
     }
+
+    @Test
+    fun `verify grammar rendering direction detection and table splitting`() {
+        // Latin text detection
+        assertTrue(com.example.ui.components.isMainlyLatin("Ich lerne Deutsch."))
+        assertTrue(com.example.ui.components.isMainlyLatin("Guten Tag!"))
+        assertTrue(com.example.ui.components.isMainlyLatin("der Lehrer"))
+
+        // Dari text detection
+        org.junit.Assert.assertFalse(com.example.ui.components.isMainlyLatin("سلام و روز بخیر!"))
+        org.junit.Assert.assertFalse(com.example.ui.components.isMainlyLatin("من آلمانی یاد می‌گیرم."))
+        org.junit.Assert.assertFalse(com.example.ui.components.isMainlyLatin("افعال مهم برای سلام و معرفی"))
+
+        // Table row with pipe "|" split check
+        val tableLine = "ich bin | من هستم"
+        val segments = tableLine.split("|").map { it.trim() }
+        assertEquals(2, segments.size)
+        assertTrue(com.example.ui.components.isMainlyLatin(segments[0]))
+        org.junit.Assert.assertFalse(com.example.ui.components.isMainlyLatin(segments[1]))
+    }
 }

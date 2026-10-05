@@ -72,6 +72,7 @@ import com.example.ui.components.ArticleBadge
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.FlipFlashcard
+import com.example.ui.components.GrammarSectionCard
 import com.example.ui.theme.SuccessGreen
 
 enum class VocabFilter {
@@ -616,29 +617,12 @@ private fun FullReadingSection(
                 }
             }
 
-            items(currentLesson.grammarSections) { grammarSection ->
-                Card(
-                    modifier = Modifier.fillMaxWidth(),
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Column(modifier = Modifier.padding(16.dp)) {
-                        Text(
-                            text = grammarSection.title,
-                            style = MaterialTheme.typography.titleSmall,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Text(
-                            text = grammarSection.bodyDari,
-                            style = MaterialTheme.typography.bodyMedium,
-                            lineHeight = 24.sp,
-                            color = MaterialTheme.colorScheme.onSurface
-                        )
-                    }
-                }
+            itemsIndexed(currentLesson.grammarSections) { index, grammarSection ->
+                GrammarSectionCard(
+                    sectionNumber = index + 1,
+                    title = grammarSection.title,
+                    bodyDari = grammarSection.bodyDari
+                )
             }
         }
 

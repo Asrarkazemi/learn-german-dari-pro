@@ -1,0 +1,436 @@
+package com.example.ui.components
+
+import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalLayoutDirection
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.LayoutDirection
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+
+/**
+ * FIX G: Beautiful, readable rendering of grammar sections.
+ * Splits section body (bodyDari) into lines and renders with correct direction,
+ * stacked table rows for "|" separators, subheadings, and comfortable typography.
+ */
+@Composable
+fun GrammarSectionCard(
+    title: String,
+    bodyDari: String,
+    modifier: Modifier = Modifier,
+    sectionNumber: Int? = null
+) {
+    Card(
+        modifier = modifier.fillMaxWidth(),
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(18.dp)) {
+            // Header Row: Section Number / Badge & Title
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                if (sectionNumber != null) {
+                    Surface(
+                        shape = CircleShape,
+                        color = MaterialTheme.colorScheme.primaryContainer,
+                        modifier = Modifier.size(28.dp)
+                    ) {
+                        Box(contentAlignment = Alignment.Center) {
+                            Text(
+                                text = "$sectionNumber",
+                                fontSize = 13.sp,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        }
+                    }
+                    Spacer(modifier = Modifier.width(10.dp))
+                }
+
+                Text(
+                    text = title,
+                    style = MaterialTheme.typography.titleMedium,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 16.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    modifier = Modifier.weight(1f)
+                )
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+            HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f))
+            Spacer(modifier = Modifier.height(12.dp))
+
+            // Body rendering
+            GrammarSectionBodyView(bodyDari = bodyDari)
+        }
+    }
+}
+
+@Composable
+fun GrammarSectionBodyView(
+    bodyDari: String,
+    modifier: Modifier = Modifier
+) {
+    val rawLines = bodyDari.split("\n")
+
+    Column(
+        modifier = modifier.fillMaxWidth(),
+        verticalArrangement = Arrangement.spacedBy(4.dp)
+    ) {
+        var consecutiveEmptyCount = 0
+
+        for (rawLine in rawLines) {
+            val line = rawLine.trim()
+
+            if (line.isEmpty()) {
+                consecutiveEmptyCount++
+                if (consecutiveEmptyCount == 1) {
+                    Spacer(modifier = Modifier.height(8.dp))
+                }
+                continue
+            }
+            consecutiveEmptyCount = 0
+
+            // RULE 2: Table Row containing "|" separator
+            if (line.contains("|")) {
+                renderTableRowWithPipe(line)
+                continue
+            }
+
+            // RULE 3: Subheadings inside a section
+            if (isSubheadingLine(line)) {
+                renderSubheading(line)
+                continue
+            }
+
+            // Check if line is a German item with Dari translation in parentheses
+            // e.g. "- Ich heiße... (من نامیده می‌شوم / نام من ... است)"
+            if (isGermanItemWithDariParenthesis(line)) {
+                renderGermanWithDariParenthesis(line)
+                continue
+            }
+
+            // Bullet or list items
+            if (line.startsWith("•") || line.startsWith("-") || line.startsWith("*") || line.startsWith("–")) {
+                renderListItem(line)
+                continue
+            }
+
+            // Standard paragraph: check dominant script direction
+            if (isMainlyLatin(line)) {
+                // German paragraph: LTR, left-aligned
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = line,
+                        fontSize = 14.5.sp,
+                        lineHeight = 24.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    )
+                }
+            } else {
+                // Dari paragraph: RTL, right-aligned, comfortable line-height ~1.6
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Text(
+                        text = line,
+                        fontSize = 14.5.sp,
+                        lineHeight = 25.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Renders a line with "|" separator as a neat STACKED group:
+ * German segment first as LTR line, then Dari segment as RTL line.
+ */
+@Composable
+private fun renderTableRowWithPipe(line: String) {
+    val segments = line.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+    if (segments.isEmpty()) return
+
+    val latinSegments = segments.filter { isMainlyLatin(it) }
+    val dariSegments = segments.filter { !isMainlyLatin(it) }
+
+    val germanText = if (latinSegments.isNotEmpty()) {
+        latinSegments.joinToString(" • ")
+    } else if (segments.size >= 2) {
+        segments[0]
+    } else {
+        null
+    }
+
+    val dariText = if (dariSegments.isNotEmpty()) {
+        dariSegments.joinToString(" | ")
+    } else if (segments.size >= 2) {
+        segments.drop(1).joinToString(" | ")
+    } else {
+        segments.firstOrNull()
+    }
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            if (!germanText.isNullOrBlank()) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = germanText,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 15.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+            if (!dariText.isNullOrBlank()) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                    Text(
+                        text = dariText,
+                        fontWeight = FontWeight.Normal,
+                        fontSize = 13.5.sp,
+                        lineHeight = 21.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.fillMaxWidth()
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Checks if a line is a subheading inside a grammar section.
+ */
+private fun isSubheadingLine(line: String): Boolean {
+    val trimmed = line.trim()
+    if (trimmed.startsWith("###") || trimmed.startsWith("##") || trimmed.startsWith("**")) return true
+    if (trimmed.startsWith("• فعل ") || trimmed.startsWith("• صرف ") ||
+        trimmed.startsWith("• قاعده ") || trimmed.startsWith("• نکته ") ||
+        trimmed.startsWith("• ساختار ")
+    ) return true
+
+    // Short heading ending with colon
+    if (trimmed.endsWith(":") || trimmed.endsWith("：")) {
+        val clean = trimmed.removeSuffix(":").removeSuffix("：").trim()
+        if (clean.length in 3..65 && !clean.contains("(") && !clean.startsWith("-")) {
+            return true
+        }
+    }
+
+    // Numbered topic like "۱. تعریف و کاربرد"
+    if ((trimmed.startsWith("۱.") || trimmed.startsWith("1.") ||
+        trimmed.startsWith("۲.") || trimmed.startsWith("2.") ||
+        trimmed.startsWith("۳.") || trimmed.startsWith("3.") ||
+        trimmed.startsWith("۴.") || trimmed.startsWith("4.")) && trimmed.length <= 60
+    ) {
+        return !trimmed.endsWith(".") || trimmed.count { it == '.' } == 1
+    }
+
+    return false
+}
+
+@Composable
+private fun renderSubheading(line: String) {
+    val cleanTitle = line
+        .removePrefix("###")
+        .removePrefix("##")
+        .removePrefix("**")
+        .removeSuffix("**")
+        .trim()
+
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier.padding(top = 10.dp, bottom = 4.dp)
+    ) {
+        Box(
+            modifier = Modifier
+                .size(4.dp, 16.dp)
+                .background(MaterialTheme.colorScheme.primary, RoundedCornerShape(2.dp))
+        )
+        Spacer(modifier = Modifier.width(8.dp))
+        Text(
+            text = cleanTitle,
+            fontWeight = FontWeight.Bold,
+            fontSize = 15.sp,
+            color = MaterialTheme.colorScheme.primary,
+            lineHeight = 22.sp
+        )
+    }
+}
+
+/**
+ * Detects patterns like "- Ich heiße... (من نامیده می‌شوم)" where German is outside
+ * and Dari translation is in parentheses.
+ */
+private fun isGermanItemWithDariParenthesis(line: String): Boolean {
+    val openParen = line.indexOf('(')
+    val closeParen = line.lastIndexOf(')')
+    if (openParen > 2 && closeParen > openParen) {
+        val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").trim()
+        val insideParen = line.substring(openParen + 1, closeParen).trim()
+        return isMainlyLatin(beforeParen) && !isMainlyLatin(insideParen)
+    }
+    return false
+}
+
+@Composable
+private fun renderGermanWithDariParenthesis(line: String) {
+    val openParen = line.indexOf('(')
+    val closeParen = line.lastIndexOf(')')
+    val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").trim()
+    val insideParen = line.substring(openParen + 1, closeParen).trim()
+
+    Surface(
+        shape = RoundedCornerShape(10.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp)
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Text(
+                    text = beforeParen,
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 14.5.sp,
+                    color = MaterialTheme.colorScheme.primary,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                Text(
+                    text = insideParen,
+                    fontWeight = FontWeight.Normal,
+                    fontSize = 13.sp,
+                    lineHeight = 20.sp,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    textAlign = TextAlign.Start,
+                    modifier = Modifier.fillMaxWidth()
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun renderListItem(line: String) {
+    val content = line.removePrefix("•").removePrefix("-").removePrefix("*").removePrefix("–").trim()
+    val isLatin = isMainlyLatin(content)
+
+    Row(
+        modifier = Modifier
+            .fillMaxWidth()
+            .padding(vertical = 3.dp),
+        verticalAlignment = Alignment.Top
+    ) {
+        if (isLatin) {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        text = "•",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(end = 6.dp)
+                    )
+                    Text(
+                        text = content,
+                        fontWeight = FontWeight.Medium,
+                        fontSize = 14.sp,
+                        lineHeight = 23.sp,
+                        color = MaterialTheme.colorScheme.onSurface,
+                        textAlign = TextAlign.Start
+                    )
+                }
+            }
+        } else {
+            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+                Row(verticalAlignment = Alignment.Top) {
+                    Text(
+                        text = "•",
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        fontSize = 15.sp,
+                        modifier = Modifier.padding(start = 6.dp)
+                    )
+                    Text(
+                        text = content,
+                        fontSize = 14.sp,
+                        lineHeight = 24.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        textAlign = TextAlign.Start
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * Returns true if Latin letters outnumber Persian/Arabic letters in the string.
+ */
+fun isMainlyLatin(text: String): Boolean {
+    var latinCount = 0
+    var persianCount = 0
+    for (ch in text) {
+        if (ch in 'a'..'z' || ch in 'A'..'Z' || ch in "ÄÖÜäöüß") {
+            latinCount++
+        } else if (ch in '\u0600'..'\u06FF') {
+            persianCount++
+        }
+    }
+    return latinCount > persianCount
+}
