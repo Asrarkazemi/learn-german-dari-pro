@@ -1,0 +1,8 @@
+{
+  "name": "Remix آلمانی بیاموز",
+  "description": "آموزش زبان آلمانی سطح A1 به زبان فارسی دری - درس‌ها، فلش‌کارت‌ها، تمرین، صرف افعال، اعداد و گفتگوها",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
