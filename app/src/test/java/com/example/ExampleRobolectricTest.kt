@@ -505,4 +505,37 @@ class ExampleRobolectricTest {
         org.junit.Assert.assertFalse(assistantMsg.isUser)
         assertNotNull(assistantMsg.extractedLessonJson)
     }
+
+    @Test
+    fun `verify Gemini Chat error classification and fallback order`() {
+        // Primary model check
+        assertEquals("gemini-3.5-flash", com.example.data.gemini.GeminiChatService.PRIMARY_MODEL)
+
+        // Exact fallback order check
+        val expectedFallbacks = listOf(
+            "gemini-3.5-flash",
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
+        )
+        assertEquals(expectedFallbacks, com.example.data.gemini.GeminiChatService.FALLBACK_MODELS)
+
+        // Server busy classification checks (503 / 429 / overloaded / high-demand)
+        assertTrue(com.example.data.gemini.GeminiChatService.isServerBusy(503, "The model is overloaded. Please try again later."))
+        assertTrue(com.example.data.gemini.GeminiChatService.isServerBusy(429, "Resource has been exhausted (e.g. check quota)."))
+        assertTrue(com.example.data.gemini.GeminiChatService.isServerBusy(200, "high demand on server"))
+        assertTrue(com.example.data.gemini.GeminiChatService.isServerBusy(500, "Internal Server Error"))
+
+        // Busy errors must NOT be classified as key errors
+        org.junit.Assert.assertFalse(com.example.data.gemini.GeminiChatService.isKeyError(503, "The model is overloaded. Please try again later."))
+        org.junit.Assert.assertFalse(com.example.data.gemini.GeminiChatService.isKeyError(429, "Resource has been exhausted"))
+
+        // Key error classification checks (401 / 403 / API_KEY_INVALID)
+        assertTrue(com.example.data.gemini.GeminiChatService.isKeyError(400, "API_KEY_INVALID: API key not valid. Please pass a valid API key."))
+        assertTrue(com.example.data.gemini.GeminiChatService.isKeyError(401, "Unauthorized"))
+        assertTrue(com.example.data.gemini.GeminiChatService.isKeyError(403, "PERMISSION_DENIED"))
+
+        // Key errors must NOT be classified as server busy
+        org.junit.Assert.assertFalse(com.example.data.gemini.GeminiChatService.isServerBusy(401, "Unauthorized"))
+    }
 }

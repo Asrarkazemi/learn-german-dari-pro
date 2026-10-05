@@ -30,8 +30,10 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
@@ -39,6 +41,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -62,21 +65,23 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.gemini.ChatMessage
+import com.example.data.gemini.GeminiChatException
 import com.example.data.gemini.GeminiChatService
 import com.example.data.model.GrammarTopic
 import com.example.data.model.LessonData
 import com.example.ui.components.VoiceSettingsDialog
 import com.example.ui.theme.AccentAmber
+import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.IndigoPrimary
 import com.example.ui.theme.SuccessGreen
 import kotlinx.coroutines.launch
 
 /**
- * FIX I: Standard, compact Gemini chat screen layout.
- * 1) Pinned compact top header (teacher title + status + voice chip + settings)
- * 2) Weighted LazyColumn with content-hugging message bubbles (no tall stretched bubbles)
- * 3) No stray vertical lines or divider artifacts
- * 4) Suggestion chips directly above bottom input bar, with no empty gaps
+ * FIX J: Resilient Gemini chat with clean Dari errors and model fallback.
+ * 1) Pinned unclipped header row
+ * 2) Automated model fallback & retries with live Dari status
+ * 3) Clean Dari error messages (no raw English text) with «تلاش دوباره» button
+ * 4) Key hint displayed ONLY for genuine API key errors
  */
 @Composable
 fun GeminiChatScreen(
@@ -104,6 +109,8 @@ fun GeminiChatScreen(
 
     var inputText by remember { mutableStateOf("") }
     var isLoading by remember { mutableStateOf(false) }
+    var loadingStatusText by remember { mutableStateOf("جیمنای در حال تدریس و نوشتن پاسخ است...") }
+    var lastUserPrompt by remember { mutableStateOf("") }
     var showApiKeyDialog by remember { mutableStateOf(false) }
 
     val listState = rememberLazyListState()
@@ -126,14 +133,19 @@ fun GeminiChatScreen(
         if (prompt.isBlank() || isLoading) return
         val userMsg = ChatMessage(isUser = true, text = prompt)
         messages.add(userMsg)
+        lastUserPrompt = prompt
         inputText = ""
         isLoading = true
+        loadingStatusText = "جیمنای در حال تدریس و نوشتن پاسخ است..."
 
         coroutineScope.launch {
             val result = chatService.sendMessage(
                 userMessage = prompt,
                 conversationHistory = messages,
-                apiKey = currentApiKey
+                apiKey = currentApiKey,
+                onStatusUpdate = { status ->
+                    loadingStatusText = status
+                }
             )
 
             isLoading = false
@@ -144,15 +156,43 @@ fun GeminiChatScreen(
                     ChatMessage(
                         isUser = false,
                         text = responseText,
-                        extractedLessonJson = extractedJson
+                        extractedLessonJson = extractedJson,
+                        isError = false,
+                        canRetry = false,
+                        isKeyError = false
                     )
                 )
             } else {
-                val error = result.exceptionOrNull()?.localizedMessage ?: "خطای ناشناخته در ارتباط با جیمنای"
+                val exception = result.exceptionOrNull()
+                val isKeyErr = exception is GeminiChatException.KeyErrorException ||
+                        GeminiChatService.isKeyError(0, exception?.message.orEmpty())
+
+                val errorText = when (exception) {
+                    is GeminiChatException.ServerBusyException -> {
+                        "سرور جیمنای فعلاً شلوغ است؛ چند دقیقۀ دیگر دوباره کوشش کنید."
+                    }
+                    is GeminiChatException.KeyErrorException -> {
+                        "کلید API جیمنای نامعتبر است یا هنوز تنظیم نشده است. لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید."
+                    }
+                    is GeminiChatException.NetworkErrorException -> {
+                        "خطا در اتصال به اینترنت؛ لطفاً اتصال شبکه خود را بررسی کرده و دوباره تلاش کنید."
+                    }
+                    else -> {
+                        if (isKeyErr) {
+                            "کلید API جیمنای نامعتبر است یا هنوز تنظیم نشده است. لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید."
+                        } else {
+                            "سرور جیمنای فعلاً شلوغ است؛ چند دقیقۀ دیگر دوباره کوشش کنید."
+                        }
+                    }
+                }
+
                 messages.add(
                     ChatMessage(
                         isUser = false,
-                        text = "متأسفانه خطایی رخ داد: $error\nاگر کلید API تنظیم نشده است، لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید."
+                        text = errorText,
+                        isError = true,
+                        canRetry = !isKeyErr,
+                        isKeyError = isKeyErr
                     )
                 )
             }
@@ -165,16 +205,18 @@ fun GeminiChatScreen(
             .background(MaterialTheme.colorScheme.background)
             .testTag("gemini_chat_screen")
     ) {
-        // 1) HEADER PINNED AT TOP: Fixed compact height, cleanly separated from messages
+        // 1) HEADER PINNED AT TOP: Proper padding, single compact unclipped row
         Surface(
-            modifier = Modifier.fillMaxWidth(),
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight(),
             color = MaterialTheme.colorScheme.surface,
             tonalElevation = 1.dp
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 14.dp, vertical = 9.dp),
+                    .padding(horizontal = 14.dp, vertical = 10.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -198,11 +240,11 @@ fun GeminiChatScreen(
                         )
                     }
                     Spacer(modifier = Modifier.width(10.dp))
-                    Column {
+                    Column(modifier = Modifier.weight(1f, fill = false)) {
                         Text(
                             text = "استاد هوشمند آلمانی (جیمنای)",
                             fontWeight = FontWeight.Bold,
-                            fontSize = 14.sp,
+                            fontSize = 13.5.sp,
                             color = MaterialTheme.colorScheme.onSurface,
                             maxLines = 1
                         )
@@ -214,6 +256,8 @@ fun GeminiChatScreen(
                         )
                     }
                 }
+
+                Spacer(modifier = Modifier.width(8.dp))
 
                 // Voice status chip & Settings button
                 Row(
@@ -294,6 +338,14 @@ fun GeminiChatScreen(
                     onCopyText = { text ->
                         clipboardManager.setText(AnnotatedString(text))
                         Toast.makeText(context, "متن در حافظه کپی شد", Toast.LENGTH_SHORT).show()
+                    },
+                    onRetryPrompt = {
+                        if (lastUserPrompt.isNotBlank()) {
+                            sendUserPrompt(lastUserPrompt)
+                        }
+                    },
+                    onOpenKeySettings = {
+                        showApiKeyDialog = true
                     }
                 )
             }
@@ -310,7 +362,7 @@ fun GeminiChatScreen(
                         CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
-                            text = "جیمنای در حال تدریس و نوشتن پاسخ است...",
+                            text = loadingStatusText,
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
@@ -402,14 +454,16 @@ fun GeminiChatScreen(
 
 /**
  * Clean message bubble with strict content-hugging dimensions.
- * User bubbles: right-anchored in LTR / end-anchored in RTL, tight wrap without redundant copy bar.
- * Assistant bubbles: left-anchored in LTR / start-anchored in RTL, bordered surface with compact action bar.
+ * User bubbles: tight wrap without redundant copy bar.
+ * Assistant bubbles: bordered surface with compact action bar; clean Dari error messages with retry/settings button.
  */
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
     onImportLessonJson: (String) -> Unit,
-    onCopyText: (String) -> Unit
+    onCopyText: (String) -> Unit,
+    onRetryPrompt: () -> Unit = {},
+    onOpenKeySettings: () -> Unit = {}
 ) {
     val isUser = message.isUser
 
@@ -418,7 +472,7 @@ private fun ChatBubble(
         horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
         if (isUser) {
-            // User message bubble: strictly hugs the text, no extra full-width row or tall button
+            // User message bubble: strictly hugs the text
             Surface(
                 shape = RoundedCornerShape(
                     topStart = 16.dp,
@@ -440,7 +494,13 @@ private fun ChatBubble(
                 )
             }
         } else {
-            // Assistant message bubble: wraps content, clean outline border, compact actions
+            // Assistant message bubble
+            val borderColor = if (message.isError) {
+                MaterialTheme.colorScheme.error.copy(alpha = 0.4f)
+            } else {
+                MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)
+            }
+
             Surface(
                 shape = RoundedCornerShape(
                     topStart = 16.dp,
@@ -449,7 +509,7 @@ private fun ChatBubble(
                     bottomEnd = 16.dp
                 ),
                 color = MaterialTheme.colorScheme.surface,
-                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                border = BorderStroke(1.dp, borderColor),
                 modifier = Modifier
                     .wrapContentHeight()
                     .widthIn(min = 50.dp, max = 340.dp)
@@ -463,53 +523,89 @@ private fun ChatBubble(
                         text = message.text,
                         fontSize = 14.5.sp,
                         lineHeight = 22.sp,
-                        color = MaterialTheme.colorScheme.onSurface
+                        color = if (message.isError) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onSurface
                     )
 
-                    // Compact Copy button
-                    Row(
-                        modifier = Modifier
-                            .align(Alignment.End)
-                            .padding(top = 4.dp),
-                        verticalAlignment = Alignment.CenterVertically
-                    ) {
-                        IconButton(
-                            onClick = { onCopyText(message.text) },
-                            modifier = Modifier.size(28.dp)
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.ContentCopy,
-                                contentDescription = "کپی متن",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                                modifier = Modifier.size(15.dp)
-                            )
+                    // Error Actions: Retry button or Open Key Settings button
+                    if (message.isError) {
+                        Spacer(modifier = Modifier.height(10.dp))
+                        if (message.canRetry) {
+                            OutlinedButton(
+                                onClick = onRetryPrompt,
+                                modifier = Modifier.testTag("btn_retry_chat_message"),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Refresh,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("تلاش دوباره", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
+                        } else if (message.isKeyError) {
+                            Button(
+                                onClick = onOpenKeySettings,
+                                modifier = Modifier.testTag("btn_open_key_from_chat"),
+                                shape = RoundedCornerShape(10.dp),
+                                contentPadding = PaddingValues(horizontal = 12.dp, vertical = 6.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Key,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("تنظیم کلید API", fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                            }
                         }
-                    }
-
-                    // 1-Tap Import Lesson / Grammar JSON button if extracted
-                    if (message.extractedLessonJson != null) {
-                        val isGrammar = message.extractedLessonJson.contains("\"sections\"") &&
-                                !message.extractedLessonJson.contains("\"vocabulary\"")
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Button(
-                            onClick = { onImportLessonJson(message.extractedLessonJson) },
+                    } else {
+                        // Standard Assistant Actions: Compact Copy button
+                        Row(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .height(42.dp)
-                                .testTag("btn_import_from_chat"),
-                            shape = RoundedCornerShape(12.dp)
+                                .align(Alignment.End)
+                                .padding(top = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.Add,
-                                contentDescription = null,
-                                modifier = Modifier.size(18.dp)
-                            )
-                            Spacer(modifier = Modifier.width(6.dp))
-                            Text(
-                                text = if (isGrammar) "افزودن به مباحث گرامر" else "افزودن به درس‌های من",
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 13.sp
-                            )
+                            IconButton(
+                                onClick = { onCopyText(message.text) },
+                                modifier = Modifier.size(28.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.ContentCopy,
+                                    contentDescription = "کپی متن",
+                                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(15.dp)
+                                )
+                            }
+                        }
+
+                        // 1-Tap Import Lesson / Grammar JSON button if extracted
+                        if (message.extractedLessonJson != null) {
+                            val isGrammar = message.extractedLessonJson.contains("\"sections\"") &&
+                                    !message.extractedLessonJson.contains("\"vocabulary\"")
+                            Spacer(modifier = Modifier.height(8.dp))
+                            Button(
+                                onClick = { onImportLessonJson(message.extractedLessonJson) },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .height(42.dp)
+                                    .testTag("btn_import_from_chat"),
+                                shape = RoundedCornerShape(12.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Add,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(18.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = if (isGrammar) "افزودن به مباحث گرامر" else "افزودن به درس‌های من",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp
+                                )
+                            }
                         }
                     }
                 }

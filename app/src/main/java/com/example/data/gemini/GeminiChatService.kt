@@ -1,6 +1,7 @@
 package com.example.data.gemini
 
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -8,6 +9,7 @@ import okhttp3.Request
 import okhttp3.RequestBody.Companion.toRequestBody
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.IOException
 import java.util.concurrent.TimeUnit
 
 data class ChatMessage(
@@ -15,15 +17,36 @@ data class ChatMessage(
     val isUser: Boolean,
     val text: String,
     val timestamp: Long = System.currentTimeMillis(),
-    val extractedLessonJson: String? = null
+    val extractedLessonJson: String? = null,
+    val isError: Boolean = false,
+    val canRetry: Boolean = false,
+    val isKeyError: Boolean = false
 )
+
+sealed class GeminiChatException(message: String) : Exception(message) {
+    class ServerBusyException(
+        message: String = "سرور جیمنای فعلاً شلوغ است؛ چند دقیقۀ دیگر دوباره کوشش کنید."
+    ) : GeminiChatException(message)
+
+    class KeyErrorException(
+        message: String = "کلید API جیمنای نامعتبر است یا هنوز تنظیم نشده است. لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید."
+    ) : GeminiChatException(message)
+
+    class NetworkErrorException(
+        message: String = "خطا در اتصال به اینترنت؛ لطفاً اتصال شبکه خود را بررسی کرده و دوباره تلاش کنید."
+    ) : GeminiChatException(message)
+
+    class GeneralException(
+        message: String = "متأسفانه در دریافت پاسخ خطایی رخ داد؛ لطفاً دوباره کوشش کنید."
+    ) : GeminiChatException(message)
+}
 
 class GeminiChatService {
 
     private val client = OkHttpClient.Builder()
-        .connectTimeout(60, TimeUnit.SECONDS)
-        .readTimeout(60, TimeUnit.SECONDS)
-        .writeTimeout(60, TimeUnit.SECONDS)
+        .connectTimeout(45, TimeUnit.SECONDS)
+        .readTimeout(45, TimeUnit.SECONDS)
+        .writeTimeout(45, TimeUnit.SECONDS)
         .build()
 
     private val systemInstructionText = """
@@ -123,87 +146,200 @@ class GeminiChatService {
         جمله آلمانی + تلفظ به خط فارسی + ترجمه به زبان دری ارائه دهید.
     """.trimIndent()
 
+    /**
+     * Sends a chat message to Gemini with automated retry (up to 2 retries per model)
+     * and fallback to alternate models when experiencing 503, 429, or overloaded server responses.
+     */
     suspend fun sendMessage(
         userMessage: String,
         conversationHistory: List<ChatMessage>,
-        apiKey: String
+        apiKey: String,
+        onStatusUpdate: ((String) -> Unit)? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        if (apiKey.isBlank()) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isBlank()) {
             return@withContext Result.failure(
-                Exception("کلید API جیمنای تنظیم نشده است. لطفاً کلید رایگان خود را از Google AI Studio وارد کنید.")
+                GeminiChatException.KeyErrorException("کلید API جیمنای تنظیم نشده است. لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید.")
             )
         }
 
-        try {
-            val url = "https://generativelanguage.googleapis.com/v1beta/models/gemini-3.5-flash:generateContent?key=$apiKey"
+        val requestBodyJson = buildRequestBody(userMessage, conversationHistory)
+        var lastBusy = false
 
-            val contentsArray = JSONArray()
-
-            // Add previous recent messages
-            val recentTurns = conversationHistory.takeLast(6)
-            for (msg in recentTurns) {
-                val role = if (msg.isUser) "user" else "model"
-                val partObj = JSONObject().put("text", msg.text)
-                val turnObj = JSONObject()
-                    .put("role", role)
-                    .put("parts", JSONArray().put(partObj))
-                contentsArray.put(turnObj)
-            }
-
-            // Add current message
-            contentsArray.put(
-                JSONObject()
-                    .put("role", "user")
-                    .put("parts", JSONArray().put(JSONObject().put("text", userMessage)))
-            )
-
-            val rootJson = JSONObject().apply {
-                put("contents", contentsArray)
-                put("systemInstruction", JSONObject().apply {
-                    put("parts", JSONArray().put(JSONObject().put("text", systemInstructionText)))
-                })
-                put("generationConfig", JSONObject().apply {
-                    put("temperature", 0.7)
-                })
-            }
-
-            val requestBody = rootJson.toString().toRequestBody("application/json; charset=utf-8".toMediaType())
-            val request = Request.Builder()
-                .url(url)
-                .post(requestBody)
-                .build()
-
-            val response = client.newCall(request).execute()
-            val responseBody = response.body?.string().orEmpty()
-
-            if (!response.isSuccessful) {
-                val errorMsg = try {
-                    val errJson = JSONObject(responseBody).optJSONObject("error")
-                    errJson?.optString("message", "خطای دریافت پاسخ: کد ${response.code}") ?: "خطا ${response.code}"
-                } catch (e: Exception) {
-                    "خطای سرور جیمنای: کد ${response.code}"
+        for (model in FALLBACK_MODELS) {
+            // Up to 2 retries per model (total 3 attempts per model)
+            val maxRetries = 2
+            for (attempt in 0..maxRetries) {
+                if (attempt > 0) {
+                    onStatusUpdate?.invoke("سرور شلوغ است، دوباره تلاش میشود…")
+                    val retryDelayMs = if (attempt == 1) 1000L else 1500L
+                    delay(retryDelayMs)
                 }
-                return@withContext Result.failure(Exception(errorMsg))
+
+                try {
+                    val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$cleanKey"
+                    val requestBody = requestBodyJson.toRequestBody("application/json; charset=utf-8".toMediaType())
+                    val request = Request.Builder()
+                        .url(url)
+                        .post(requestBody)
+                        .build()
+
+                    val response = client.newCall(request).execute()
+                    val responseCode = response.code
+                    val responseBody = response.body?.string().orEmpty()
+
+                    if (response.isSuccessful) {
+                        val parsedText = parseCandidateText(responseBody)
+                        if (parsedText.isNotBlank()) {
+                            return@withContext Result.success(parsedText)
+                        } else {
+                            return@withContext Result.failure(
+                                GeminiChatException.GeneralException("پاسخی از جیمنای دریافت نشد.")
+                            )
+                        }
+                    }
+
+                    // Check for invalid or missing API key error
+                    if (isKeyError(responseCode, responseBody)) {
+                        return@withContext Result.failure(
+                            GeminiChatException.KeyErrorException("کلید API جیمنای نامعتبر است. لطفاً از دکمه تنظیم کلید در بالای صفحه کلید رایگان خود را وارد کنید.")
+                        )
+                    }
+
+                    // Check for 503 / 429 / overloaded
+                    if (isServerBusy(responseCode, responseBody)) {
+                        lastBusy = true
+                        // Continue to next retry or next model
+                        continue
+                    }
+
+                    // Other HTTP error code (e.g. 400 Bad Request not related to key)
+                    return@withContext Result.failure(
+                        GeminiChatException.GeneralException("خطا در ارتباط با سرور جیمنای (کد $responseCode)")
+                    )
+
+                } catch (e: IOException) {
+                    // Network disconnect or timeout
+                    if (attempt == maxRetries && model == FALLBACK_MODELS.last()) {
+                        return@withContext Result.failure(
+                            GeminiChatException.NetworkErrorException("خطا در اتصال به اینترنت؛ لطفاً اتصال شبکه خود را بررسی کرده و دوباره تلاش کنید.")
+                        )
+                    }
+                    onStatusUpdate?.invoke("سرور شلوغ است، دوباره تلاش میشود…")
+                    delay(1000L)
+                } catch (e: Exception) {
+                    if (attempt == maxRetries && model == FALLBACK_MODELS.last()) {
+                        return@withContext Result.failure(
+                            GeminiChatException.GeneralException("خطای غیرمنتظره در ارتباط با جیمنای")
+                        )
+                    }
+                }
             }
 
+            // Before switching to the next fallback model
+            if (model != FALLBACK_MODELS.last()) {
+                onStatusUpdate?.invoke("سرور شلوغ است، دوباره تلاش میشود…")
+                delay(1000L)
+            }
+        }
+
+        if (lastBusy) {
+            Result.failure(
+                GeminiChatException.ServerBusyException("سرور جیمنای فعلاً شلوغ است؛ چند دقیقۀ دیگر دوباره کوشش کنید.")
+            )
+        } else {
+            Result.failure(
+                GeminiChatException.GeneralException("خطا در ارتباط با سرور جیمنای؛ لطفاً دوباره کوشش کنید.")
+            )
+        }
+    }
+
+    private fun buildRequestBody(userMessage: String, conversationHistory: List<ChatMessage>): String {
+        val contentsArray = JSONArray()
+
+        // Take last 6 recent turns to keep context lightweight
+        val recentTurns = conversationHistory.takeLast(6).filter { !it.isError }
+        for (msg in recentTurns) {
+            val role = if (msg.isUser) "user" else "model"
+            val partObj = JSONObject().put("text", msg.text)
+            val turnObj = JSONObject()
+                .put("role", role)
+                .put("parts", JSONArray().put(partObj))
+            contentsArray.put(turnObj)
+        }
+
+        // Add current message
+        contentsArray.put(
+            JSONObject()
+                .put("role", "user")
+                .put("parts", JSONArray().put(JSONObject().put("text", userMessage)))
+        )
+
+        val rootJson = JSONObject().apply {
+            put("contents", contentsArray)
+            put("systemInstruction", JSONObject().apply {
+                put("parts", JSONArray().put(JSONObject().put("text", systemInstructionText)))
+            })
+            put("generationConfig", JSONObject().apply {
+                put("temperature", 0.7)
+            })
+        }
+        return rootJson.toString()
+    }
+
+    private fun parseCandidateText(responseBody: String): String {
+        return try {
             val respJson = JSONObject(responseBody)
-            val candidates = respJson.optJSONArray("candidates")
-            if (candidates == null || candidates.length() == 0) {
-                return@withContext Result.failure(Exception("پاسخی از جیمنای دریافت نشد."))
-            }
-
+            val candidates = respJson.optJSONArray("candidates") ?: return ""
+            if (candidates.length() == 0) return ""
             val firstCand = candidates.getJSONObject(0)
-            val content = firstCand.optJSONObject("content")
-            val parts = content?.optJSONArray("parts")
-            val text = parts?.optJSONObject(0)?.optString("text", "") ?: ""
-
-            Result.success(text)
+            val content = firstCand.optJSONObject("content") ?: return ""
+            val parts = content.optJSONArray("parts") ?: return ""
+            parts.optJSONObject(0)?.optString("text", "").orEmpty()
         } catch (e: Exception) {
-            Result.failure(Exception("خطا در اتصال به اینترنت یا سرور: ${e.localizedMessage ?: "نامشخص"}"))
+            ""
         }
     }
 
     companion object {
+        const val PRIMARY_MODEL = "gemini-3.5-flash"
+
+        // Fallback chain in strict order: primary first, then 2.5-flash -> 2.5-flash-lite -> 2.0-flash (no duplicates)
+        val FALLBACK_MODELS = listOf(
+            PRIMARY_MODEL,
+            "gemini-2.5-flash",
+            "gemini-2.5-flash-lite",
+            "gemini-2.0-flash"
+        ).distinct()
+
+        fun isServerBusy(code: Int, responseBody: String): Boolean {
+            if (code == 503 || code == 429 || code == 500 || code == 504 || code == 502) return true
+            val lower = responseBody.lowercase()
+            return lower.contains("503") ||
+                    lower.contains("429") ||
+                    lower.contains("high demand") ||
+                    lower.contains("high-demand") ||
+                    lower.contains("overloaded") ||
+                    lower.contains("resource has been exhausted") ||
+                    lower.contains("resource_exhausted") ||
+                    lower.contains("quota") ||
+                    lower.contains("rate limit") ||
+                    lower.contains("rate_limit") ||
+                    lower.contains("unavailable") ||
+                    lower.contains("temporarily unavailable")
+        }
+
+        fun isKeyError(code: Int, responseBody: String): Boolean {
+            if (code == 401 || code == 403) return true
+            val lower = responseBody.lowercase()
+            return lower.contains("api_key_invalid") ||
+                    lower.contains("api key not valid") ||
+                    lower.contains("invalid api key") ||
+                    lower.contains("permission_denied") ||
+                    lower.contains("api key expired") ||
+                    lower.contains("unauthenticated")
+        }
+
         fun extractLessonJson(text: String): String? {
             val jsonStart = text.indexOf("```json")
             if (jsonStart != -1) {
@@ -211,7 +347,9 @@ class GeminiChatService {
                 val jsonEnd = afterStart.indexOf("```")
                 if (jsonEnd != -1) {
                     val potentialJson = afterStart.substring(0, jsonEnd).trim()
-                    if (potentialJson.contains("\"vocabulary\"") || potentialJson.contains("\"exercises\"") || potentialJson.contains("\"sections\"")) {
+                    if (potentialJson.contains("\"vocabulary\"") ||
+                        potentialJson.contains("\"exercises\"") ||
+                        potentialJson.contains("\"sections\"")) {
                         return potentialJson
                     }
                 }
