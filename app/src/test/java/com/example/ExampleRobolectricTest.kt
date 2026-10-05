@@ -386,4 +386,123 @@ class ExampleRobolectricTest {
         assertTrue(com.example.ui.components.isMainlyLatin(segments[0]))
         org.junit.Assert.assertFalse(com.example.ui.components.isMainlyLatin(segments[1]))
     }
+
+    @Test
+    fun `verify GrammarBookRepository isolation, persistence, number 101 support, and delete`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val grammarBookRepo = com.example.data.repository.GrammarBookRepository.getInstance(context)
+        val courseRepo = com.example.data.repository.UnifiedCourseRepository.getInstance(context)
+
+        val grammarLesson101Json = """
+            {
+              "id": "grammar_book_101",
+              "number": 101,
+              "titleGerman": "Personalpronomen",
+              "titleDari": "ضمایر شخصی در زبان آلمانی",
+              "vocabulary": [
+                {
+                  "article": "das",
+                  "word": "Pronomen",
+                  "pronunciationPersianScript": "پرونومِن",
+                  "meaningDari": "ضمیر"
+                }
+              ],
+              "exampleSentences": [
+                {
+                  "german": "Ich lerne Grammatik.",
+                  "pronunciation": "ایش لِرنه گراماتیک.",
+                  "meaningDari": "من گرامر یاد می‌گیرم."
+                }
+              ],
+              "exercises": [
+                {
+                  "type": "multiple-choice",
+                  "question": "___ heiße Ali.",
+                  "pronunciation": "ایش هایسه علی.",
+                  "translationDari": "من علی نام دارم.",
+                  "options": ["Ich", "Du", "Er", "Sie"],
+                  "correctAnswer": "Ich",
+                  "explanationDari": "برای فعل heiße ضمیر Ich استفاده می‌شود."
+                }
+              ],
+              "dialogues": [],
+              "grammarSections": [
+                {
+                  "title": "تعریف ضمایر فاعلی",
+                  "bodyDari": "در زبان آلمانی ضمایر فاعلی شامل ich, du, er, sie, es, wir, ihr, sie, Sie هستند."
+                }
+              ]
+            }
+        """.trimIndent()
+
+        // 1. Import lesson 101 into Grammar Book
+        val result = grammarBookRepo.importJson(grammarLesson101Json)
+        assertTrue(result.isSuccess)
+        val batchRes = result.getOrThrow()
+        assertEquals(1, batchRes.successCount)
+        assertTrue(batchRes.summaryMessage.contains("۱۰۱"))
+
+        // 2. Verify lesson 101 is in grammarBookRepo with number 101 preserved
+        val foundInGrammarBook = grammarBookRepo.lessonsFlow.value.find { it.number == 101 }
+        assertNotNull(foundInGrammarBook)
+        assertEquals("Personalpronomen", foundInGrammarBook?.titleGerman)
+        assertEquals(101, foundInGrammarBook?.number)
+
+        // 3. Verify total isolation: lesson 101 MUST NOT appear in courseRepo («درس‌ها»)
+        val foundInCourse = courseRepo.lessonsFlow.value.find { it.number == 101 }
+        assertTrue("Lesson 101 must not appear in courseRepo", foundInCourse == null)
+
+        // 4. Delete lesson 101 from grammarBookRepo
+        val deleted = grammarBookRepo.deleteLesson("101")
+        assertTrue(deleted)
+        val afterDelete = grammarBookRepo.lessonsFlow.value.find { it.number == 101 }
+        assertTrue(afterDelete == null)
+    }
+
+    @Test
+    fun `verify Gemini Chat message extraction and chat model behavior`() {
+        val userMsg = com.example.data.gemini.ChatMessage(
+            isUser = true,
+            text = "سلام"
+        )
+        assertTrue(userMsg.isUser)
+        assertEquals("سلام", userMsg.text)
+
+        val assistantResponse = """
+            بله، سلام و درود! در اینجا یک درس کامل برای شما آماده کرده‌ام:
+            ```json
+            {
+              "id": "chat_lesson_1",
+              "number": 99,
+              "titleGerman": "Im Restaurant",
+              "titleDari": "در رستورانت",
+              "vocabulary": [
+                {
+                  "article": "das",
+                  "word": "Essen",
+                  "pronunciationPersianScript": "اِسِن",
+                  "meaningDari": "غذا"
+                }
+              ],
+              "exampleSentences": [],
+              "exercises": [],
+              "dialogues": [],
+              "grammarSections": []
+            }
+            ```
+        """.trimIndent()
+
+        val extracted = com.example.data.gemini.GeminiChatService.extractLessonJson(assistantResponse)
+        assertNotNull(extracted)
+        assertTrue(extracted!!.contains("Im Restaurant"))
+        assertTrue(extracted.contains("chat_lesson_1"))
+
+        val assistantMsg = com.example.data.gemini.ChatMessage(
+            isUser = false,
+            text = assistantResponse,
+            extractedLessonJson = extracted
+        )
+        org.junit.Assert.assertFalse(assistantMsg.isUser)
+        assertNotNull(assistantMsg.extractedLessonJson)
+    }
 }

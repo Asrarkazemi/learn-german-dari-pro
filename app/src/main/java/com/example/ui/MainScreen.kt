@@ -66,6 +66,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.repository.GrammarBookRepository
 import com.example.data.repository.GrammarRepository
 import com.example.data.repository.UnifiedCourseRepository
 import com.example.data.storage.UserProgressManager
@@ -109,16 +110,19 @@ fun MainScreen(
     val progressManager = remember { UserProgressManager.getInstance(context) }
     val courseRepository = remember { UnifiedCourseRepository.getInstance(context) }
     val grammarRepository = remember { GrammarRepository.getInstance(context) }
+    val grammarBookRepository = remember { GrammarBookRepository.getInstance(context) }
 
     val allLessons by courseRepository.lessonsFlow.collectAsState()
     val overrideNumbers by courseRepository.overrideNumbersFlow.collectAsState()
     val allGrammarTopics by grammarRepository.grammarTopicsFlow.collectAsState()
     val overrideGrammarNumbers by grammarRepository.overrideNumbersFlow.collectAsState()
+    val grammarBookLessons by grammarBookRepository.lessonsFlow.collectAsState()
     val learnedWords by progressManager.learnedWordsFlow.collectAsState()
     val quizHighScore by progressManager.quizHighScoreFlow.collectAsState()
     val savedGeminiKey by progressManager.geminiApiKeyFlow.collectAsState()
 
     var currentTab by remember { mutableStateOf(NavDestination.HOME) }
+    var activeLessonIsGrammarBook by remember { mutableStateOf(false) }
     var selectedLessonIdForVocab by remember { mutableStateOf("lesson_1") }
     var selectedLessonSection by remember { mutableIntStateOf(0) }
     var selectedLessonIdForPractice by remember { mutableStateOf("lesson_1") }
@@ -252,24 +256,41 @@ fun MainScreen(
                         NavDestination.HOME -> {
                             HomeScreen(
                                 allLessons = allLessons,
+                                grammarBookLessons = grammarBookLessons,
                                 learnedWords = learnedWords,
                                 quizHighScore = quizHighScore,
                                 overrideLessonNumbers = overrideNumbers,
                                 onNavigateToLessonVocab = { lessonId ->
                                     selectedLessonIdForVocab = lessonId
                                     selectedLessonSection = 0
+                                    activeLessonIsGrammarBook = false
                                     currentTab = NavDestination.VOCABULARY
                                 },
                                 onNavigateToLessonPractice = { lessonId ->
                                     selectedLessonIdForVocab = lessonId
                                     selectedLessonSection = 3
+                                    activeLessonIsGrammarBook = false
+                                    currentTab = NavDestination.VOCABULARY
+                                },
+                                onNavigateToGrammarBookLessonVocab = { lessonId ->
+                                    selectedLessonIdForVocab = lessonId
+                                    selectedLessonSection = 0
+                                    activeLessonIsGrammarBook = true
+                                    currentTab = NavDestination.VOCABULARY
+                                },
+                                onNavigateToGrammarBookLessonPractice = { lessonId ->
+                                    selectedLessonIdForVocab = lessonId
+                                    selectedLessonSection = 3
+                                    activeLessonIsGrammarBook = true
                                     currentTab = NavDestination.VOCABULARY
                                 },
                                 onNavigateToNumbers = { isNumbersScreenOpen = true },
                                 onNavigateToQuiz = { currentTab = NavDestination.QUIZ },
                                 onNavigateToMuse = { currentTab = NavDestination.MUSE },
                                 onImportJson = { json -> courseRepository.importJson(json) },
+                                onImportGrammarBookJson = { json -> grammarBookRepository.importJson(json) },
                                 onDeleteCustomLesson = { lessonId -> courseRepository.deleteCustomLesson(lessonId) },
+                                onDeleteGrammarBookLesson = { lessonId -> grammarBookRepository.deleteLesson(lessonId) },
                                 onNavigateToGrammar = { currentTab = NavDestination.GRAMMAR }
                             )
                         }
@@ -286,8 +307,13 @@ fun MainScreen(
                         }
 
                         NavDestination.VOCABULARY -> {
+                            val activeLessons = if (activeLessonIsGrammarBook && grammarBookLessons.isNotEmpty()) {
+                                grammarBookLessons
+                            } else {
+                                allLessons
+                            }
                             VocabularyScreen(
-                                allLessons = allLessons,
+                                allLessons = activeLessons,
                                 initialLessonId = selectedLessonIdForVocab,
                                 learnedWords = learnedWords,
                                 onToggleLearned = { wordKey, learned ->
@@ -299,8 +325,13 @@ fun MainScreen(
                         }
 
                         NavDestination.PRACTICE -> {
+                            val activeLessons = if (activeLessonIsGrammarBook && grammarBookLessons.isNotEmpty()) {
+                                grammarBookLessons
+                            } else {
+                                allLessons
+                            }
                             PracticeScreen(
-                                allLessons = allLessons,
+                                allLessons = activeLessons,
                                 initialLessonId = selectedLessonIdForPractice,
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) }
                             )

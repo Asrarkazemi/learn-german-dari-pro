@@ -52,7 +52,8 @@ import java.io.InputStreamReader
 fun ImportLessonDialog(
     onDismiss: () -> Unit,
     onImportJson: (String) -> Result<BatchImportResult>,
-    onImportSuccess: (BatchImportResult) -> Unit
+    onImportSuccess: (BatchImportResult) -> Unit,
+    title: String = "افزودن درس یا مجموعه دروس (JSON)"
 ) {
     val context = LocalContext.current
     var selectedTab by remember { mutableIntStateOf(0) } // 0: انتخاب فایل, 1: چسباندن JSON
@@ -88,7 +89,7 @@ fun ImportLessonDialog(
         onDismissRequest = onDismiss,
         title = {
             Text(
-                text = "افزودن درس یا مجموعه دروس (JSON)",
+                text = title,
                 fontWeight = FontWeight.Bold,
                 fontSize = 18.sp
             )

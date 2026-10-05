@@ -2,6 +2,7 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -17,6 +18,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -26,29 +28,21 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.Key
-import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.SmartToy
-import androidx.compose.material.icons.filled.VolumeUp
-import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
-import androidx.compose.material3.Card
-import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
-import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
-import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
@@ -62,11 +56,9 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalClipboardManager
 import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.AnnotatedString
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.gemini.ChatMessage
@@ -79,6 +71,13 @@ import com.example.ui.theme.IndigoPrimary
 import com.example.ui.theme.SuccessGreen
 import kotlinx.coroutines.launch
 
+/**
+ * FIX I: Standard, compact Gemini chat screen layout.
+ * 1) Pinned compact top header (teacher title + status + voice chip + settings)
+ * 2) Weighted LazyColumn with content-hugging message bubbles (no tall stretched bubbles)
+ * 3) No stray vertical lines or divider artifacts
+ * 4) Suggestion chips directly above bottom input bar, with no empty gaps
+ */
 @Composable
 fun GeminiChatScreen(
     currentApiKey: String,
@@ -163,21 +162,27 @@ fun GeminiChatScreen(
     Column(
         modifier = modifier
             .fillMaxSize()
+            .background(MaterialTheme.colorScheme.background)
             .testTag("gemini_chat_screen")
     ) {
-        // Chat Top Bar with API Key Button
+        // 1) HEADER PINNED AT TOP: Fixed compact height, cleanly separated from messages
         Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-            modifier = Modifier.fillMaxWidth()
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
         ) {
             Row(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp),
+                    .padding(horizontal = 14.dp, vertical = 9.dp),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
+                // Teacher Identity & Status
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
                     Box(
                         modifier = Modifier
                             .size(36.dp)
@@ -198,26 +203,34 @@ fun GeminiChatScreen(
                             text = "استاد هوشمند آلمانی (جیمنای)",
                             fontWeight = FontWeight.Bold,
                             fontSize = 14.sp,
-                            color = MaterialTheme.colorScheme.onSurface
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1
                         )
                         Text(
-                            text = if (currentApiKey.isNotEmpty()) "کلید API فعال است ✓ (تلفظ طبیعی جیمنای)" else "نیاز به کلید API",
+                            text = if (currentApiKey.isNotEmpty()) "کلید API فعال است ✓" else "نیاز به کلید API",
                             fontSize = 11.sp,
-                            color = if (currentApiKey.isNotEmpty()) SuccessGreen else AccentAmber
+                            color = if (currentApiKey.isNotEmpty()) SuccessGreen else AccentAmber,
+                            maxLines = 1
                         )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    // Visible voice status (FIX A (2))
+                // Voice status chip & Settings button
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    // Voice chip (clickable to open voice settings)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
                         color = if (currentApiKey.isNotEmpty()) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
-                        modifier = Modifier.padding(end = 8.dp)
+                        modifier = Modifier
+                            .clip(RoundedCornerShape(10.dp))
+                            .clickable { showApiKeyDialog = true }
                     ) {
                         Text(
                             text = if (currentApiKey.isNotEmpty()) "صدا: جیمنای ✨" else "صدا: گوشی",
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
                             color = if (currentApiKey.isNotEmpty()) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
@@ -225,30 +238,38 @@ fun GeminiChatScreen(
                     }
 
                     // API Key Settings Button
-                    OutlinedButton(
+                    IconButton(
                         onClick = { showApiKeyDialog = true },
-                        modifier = Modifier.testTag("btn_gemini_api_key_settings")
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.8f))
+                            .testTag("btn_gemini_api_key_settings")
                     ) {
                         Icon(
                             imageVector = Icons.Default.Key,
                             contentDescription = "کلید API جیمنای",
-                            modifier = Modifier.size(16.dp)
+                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.size(18.dp)
                         )
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text("کلید API جیمنای", fontSize = 12.sp)
                     }
                 }
             }
         }
 
-        // Messages List
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            thickness = 1.dp
+        )
+
+        // 2) MESSAGE LIST: Fills middle with weight(1f), messages anchored to top, no stretching
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .weight(1f)
                 .fillMaxWidth(),
-            contentPadding = PaddingValues(16.dp),
-            verticalArrangement = Arrangement.spacedBy(14.dp)
+            contentPadding = PaddingValues(horizontal = 14.dp, vertical = 12.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
             items(messages, key = { it.id }) { msg ->
                 ChatBubble(
@@ -280,11 +301,13 @@ fun GeminiChatScreen(
             if (isLoading) {
                 item {
                     Row(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 4.dp),
                         horizontalArrangement = Arrangement.Start,
                         verticalAlignment = Alignment.CenterVertically
                     ) {
-                        CircularProgressIndicator(modifier = Modifier.size(24.dp), strokeWidth = 2.dp)
+                        CircularProgressIndicator(modifier = Modifier.size(20.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(10.dp))
                         Text(
                             text = "جیمنای در حال تدریس و نوشتن پاسخ است...",
@@ -296,7 +319,7 @@ fun GeminiChatScreen(
             }
         }
 
-        // Quick Suggestion Chips
+        // 3) SUGGESTION CHIPS: Sits directly above input row
         LazyRow(
             modifier = Modifier
                 .fillMaxWidth()
@@ -307,44 +330,56 @@ fun GeminiChatScreen(
                 FilterChip(
                     selected = false,
                     onClick = { sendUserPrompt(prompt) },
-                    label = { Text(prompt, fontSize = 12.sp) }
+                    label = { Text(prompt, fontSize = 11.5.sp) }
                 )
             }
         }
 
-        // Input Field and Send Button
-        Row(
-            modifier = Modifier
-                .fillMaxWidth()
-                .padding(12.dp),
-            verticalAlignment = Alignment.CenterVertically
+        // 4) BOTTOM AREA: Compact input row pinned at the bottom, directly above bottom navigation
+        Surface(
+            modifier = Modifier.fillMaxWidth(),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 2.dp
         ) {
-            OutlinedTextField(
-                value = inputText,
-                onValueChange = { inputText = it },
-                placeholder = { Text("سوال یا درخواست خود را بنویسید...", fontSize = 14.sp) },
-                modifier = Modifier
-                    .weight(1f)
-                    .testTag("gemini_chat_input"),
-                shape = RoundedCornerShape(20.dp),
-                maxLines = 4
-            )
-
-            Spacer(modifier = Modifier.width(8.dp))
-
-            FilledIconButton(
-                onClick = { sendUserPrompt(inputText) },
-                enabled = inputText.isNotBlank() && !isLoading,
-                modifier = Modifier
-                    .size(50.dp)
-                    .testTag("gemini_chat_send_button"),
-                shape = CircleShape
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.Send,
-                    contentDescription = "ارسال پیام",
-                    modifier = Modifier.size(22.dp)
+            Column {
+                HorizontalDivider(
+                    color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.3f),
+                    thickness = 1.dp
                 )
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 10.dp, vertical = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    OutlinedTextField(
+                        value = inputText,
+                        onValueChange = { inputText = it },
+                        placeholder = { Text("سوال یا درخواست خود را بنویسید...", fontSize = 13.5.sp) },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("gemini_chat_input"),
+                        shape = RoundedCornerShape(22.dp),
+                        maxLines = 4
+                    )
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    FilledIconButton(
+                        onClick = { sendUserPrompt(inputText) },
+                        enabled = inputText.isNotBlank() && !isLoading,
+                        modifier = Modifier
+                            .size(46.dp)
+                            .testTag("gemini_chat_send_button"),
+                        shape = CircleShape
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Send,
+                            contentDescription = "ارسال پیام",
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                }
             }
         }
     }
@@ -365,6 +400,11 @@ fun GeminiChatScreen(
     }
 }
 
+/**
+ * Clean message bubble with strict content-hugging dimensions.
+ * User bubbles: right-anchored in LTR / end-anchored in RTL, tight wrap without redundant copy bar.
+ * Assistant bubbles: left-anchored in LTR / start-anchored in RTL, bordered surface with compact action bar.
+ */
 @Composable
 private fun ChatBubble(
     message: ChatMessage,
@@ -372,86 +412,108 @@ private fun ChatBubble(
     onCopyText: (String) -> Unit
 ) {
     val isUser = message.isUser
-    val alignment = if (isUser) Alignment.End else Alignment.Start
-    val bgColor = if (isUser) {
-        MaterialTheme.colorScheme.primaryContainer
-    } else {
-        MaterialTheme.colorScheme.surface
-    }
 
-    val textColor = if (isUser) {
-        MaterialTheme.colorScheme.onPrimaryContainer
-    } else {
-        MaterialTheme.colorScheme.onSurface
-    }
-
-    Column(
+    Row(
         modifier = Modifier.fillMaxWidth(),
-        horizontalAlignment = alignment
+        horizontalArrangement = if (isUser) Arrangement.End else Arrangement.Start
     ) {
-        Card(
-            shape = RoundedCornerShape(
-                topStart = 18.dp,
-                topEnd = 18.dp,
-                bottomStart = if (isUser) 18.dp else 4.dp,
-                bottomEnd = if (isUser) 4.dp else 18.dp
-            ),
-            colors = CardDefaults.cardColors(containerColor = bgColor),
-            elevation = CardDefaults.cardElevation(defaultElevation = 2.dp),
-            modifier = Modifier.widthIn(max = 340.dp)
-        ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+        if (isUser) {
+            // User message bubble: strictly hugs the text, no extra full-width row or tall button
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 16.dp,
+                    bottomEnd = 4.dp
+                ),
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier
+                    .wrapContentHeight()
+                    .widthIn(min = 36.dp, max = 290.dp)
+            ) {
                 Text(
                     text = message.text,
+                    modifier = Modifier.padding(horizontal = 14.dp, vertical = 9.dp),
                     fontSize = 15.sp,
-                    color = textColor,
-                    lineHeight = 22.sp
+                    lineHeight = 22.sp,
+                    color = MaterialTheme.colorScheme.onPrimaryContainer
                 )
-
-                // Copy and Actions Row
-                Row(
+            }
+        } else {
+            // Assistant message bubble: wraps content, clean outline border, compact actions
+            Surface(
+                shape = RoundedCornerShape(
+                    topStart = 16.dp,
+                    topEnd = 16.dp,
+                    bottomStart = 4.dp,
+                    bottomEnd = 16.dp
+                ),
+                color = MaterialTheme.colorScheme.surface,
+                border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.45f)),
+                modifier = Modifier
+                    .wrapContentHeight()
+                    .widthIn(min = 50.dp, max = 340.dp)
+            ) {
+                Column(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.End,
-                    verticalAlignment = Alignment.CenterVertically
+                        .padding(12.dp)
+                        .wrapContentHeight()
                 ) {
-                    IconButton(
-                        onClick = { onCopyText(message.text) },
-                        modifier = Modifier.size(28.dp)
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.ContentCopy,
-                            contentDescription = "کپی متن",
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                            modifier = Modifier.size(16.dp)
-                        )
-                    }
-                }
+                    Text(
+                        text = message.text,
+                        fontSize = 14.5.sp,
+                        lineHeight = 22.sp,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
 
-                // If Lesson or Grammar JSON was detected, offer 1-tap import!
-                if (!isUser && message.extractedLessonJson != null) {
-                    val isGrammar = message.extractedLessonJson.contains("\"sections\"") && !message.extractedLessonJson.contains("\"vocabulary\"")
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Button(
-                        onClick = { onImportLessonJson(message.extractedLessonJson) },
+                    // Compact Copy button
+                    Row(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .height(44.dp)
-                            .testTag("btn_import_from_chat"),
-                        shape = RoundedCornerShape(12.dp)
+                            .align(Alignment.End)
+                            .padding(top = 4.dp),
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Icon(imageVector = Icons.Default.Add, contentDescription = null)
-                        Spacer(modifier = Modifier.width(6.dp))
-                        Text(
-                            text = if (isGrammar) "افزودن به مباحث گرامر" else "افزودن به درس‌های من",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 13.sp
-                        )
+                        IconButton(
+                            onClick = { onCopyText(message.text) },
+                            modifier = Modifier.size(28.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.ContentCopy,
+                                contentDescription = "کپی متن",
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(15.dp)
+                            )
+                        }
+                    }
+
+                    // 1-Tap Import Lesson / Grammar JSON button if extracted
+                    if (message.extractedLessonJson != null) {
+                        val isGrammar = message.extractedLessonJson.contains("\"sections\"") &&
+                                !message.extractedLessonJson.contains("\"vocabulary\"")
+                        Spacer(modifier = Modifier.height(8.dp))
+                        Button(
+                            onClick = { onImportLessonJson(message.extractedLessonJson) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(42.dp)
+                                .testTag("btn_import_from_chat"),
+                            shape = RoundedCornerShape(12.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Add,
+                                contentDescription = null,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = if (isGrammar) "افزودن به مباحث گرامر" else "افزودن به درس‌های من",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 13.sp
+                            )
+                        }
                     }
                 }
             }
         }
     }
 }
-
