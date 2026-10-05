@@ -47,6 +47,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
@@ -69,6 +70,7 @@ import com.example.data.gemini.GeminiChatException
 import com.example.data.gemini.GeminiChatService
 import com.example.data.model.GrammarTopic
 import com.example.data.model.LessonData
+import com.example.data.storage.UserProgressManager
 import com.example.ui.components.VoiceSettingsDialog
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.ErrorRed
@@ -97,6 +99,9 @@ fun GeminiChatScreen(
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
     val chatService = remember { GeminiChatService() }
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    val isTtsCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
+    val isVoiceActive = currentApiKey.isNotEmpty() && !isTtsCooldownActive
 
     val messages = remember {
         mutableStateListOf(
@@ -267,17 +272,17 @@ fun GeminiChatScreen(
                     // Voice chip (clickable to open voice settings)
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (currentApiKey.isNotEmpty()) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
+                        color = if (isVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
                         modifier = Modifier
                             .clip(RoundedCornerShape(10.dp))
                             .clickable { showApiKeyDialog = true }
                     ) {
                         Text(
-                            text = if (currentApiKey.isNotEmpty()) "صدا: جیمنای ✨" else "صدا: گوشی",
+                            text = if (isVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (currentApiKey.isNotEmpty()) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (isVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
 

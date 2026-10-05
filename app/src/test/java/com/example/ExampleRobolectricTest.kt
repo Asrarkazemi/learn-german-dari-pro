@@ -538,4 +538,135 @@ class ExampleRobolectricTest {
         // Key errors must NOT be classified as server busy
         org.junit.Assert.assertFalse(com.example.data.gemini.GeminiChatService.isServerBusy(401, "Unauthorized"))
     }
+
+    @Test
+    fun `verify Gemini TTS quota cooldown, model fallback, and honest Dari status`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
+        val ttsManager = com.example.util.TtsManager(context)
+
+        // 1. Model order
+        assertEquals("gemini-2.5-flash-tts", com.example.util.TtsManager.PRIMARY_TTS_MODEL)
+        assertEquals("gemini-2.5-flash-preview-tts", com.example.util.TtsManager.SECONDARY_TTS_MODEL)
+        val expectedModels = listOf("gemini-2.5-flash-tts", "gemini-2.5-flash-preview-tts")
+        assertEquals(expectedModels, com.example.util.TtsManager.TTS_MODELS)
+
+        // 2. Exact Dari quota message
+        assertEquals(
+            "سهمیۀ رایگان روزانۀ صدای جیمنای تمام شده است (۱۰ جمله در روز). صدا موقتاً از گوشی پخش میشود؛ جملههایی که قبلاً با صدای جیمنای پخش شدهاند از حافظه پخش میشوند.",
+            com.example.util.TtsManager.QUOTA_EXCEEDED_DARI_MSG
+        )
+
+        // 3. Quota error detection
+        val userErrorSnippet = "Quota exceeded for metric: generativelanguage.googleapis.com/generate_content_free_tier_requests, limit: 10, model: gemini-2.5-flash-tts. Please retry in 11h47m"
+        assertTrue(com.example.util.TtsManager.isQuotaError(429, userErrorSnippet))
+        assertTrue(com.example.util.TtsManager.isQuotaError(400, "RESOURCE_EXHAUSTED: You have exceeded your current quota."))
+        org.junit.Assert.assertFalse(com.example.util.TtsManager.isKeyError(429, userErrorSnippet))
+
+        // 4. Retry-after duration parsing
+        val durationMs = com.example.util.TtsManager.parseCooldownDurationMs(userErrorSnippet, null)
+        assertTrue("Duration must be at least 11 hours in ms", durationMs >= 11 * 3600_000L)
+
+        // 5. Cooldown persistence & honest status
+        progressManager.clearTtsCooldowns()
+        org.junit.Assert.assertFalse(progressManager.areAllTtsModelsInCooldown())
+        org.junit.Assert.assertFalse(ttsManager.areAllTtsModelsInCooldown())
+
+        // Set cooldown on both models
+        val futureTime = System.currentTimeMillis() + 3600_000L
+        progressManager.setTtsCooldown("gemini-2.5-flash-tts", futureTime)
+        progressManager.setTtsCooldown("gemini-2.5-flash-preview-tts", futureTime)
+
+        assertTrue(progressManager.areAllTtsModelsInCooldown())
+        assertTrue(ttsManager.areAllTtsModelsInCooldown())
+        org.junit.Assert.assertFalse("When in cooldown, isGeminiVoiceActive must be false", ttsManager.isGeminiVoiceActive())
+
+        // Cleanup
+        progressManager.clearTtsCooldowns()
+        org.junit.Assert.assertFalse(progressManager.areAllTtsModelsInCooldown())
+    }
+
+    @Test
+    fun `verify permanent in-app voice library storage, per-text keying, legacy fallback, and stats`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
+        val ttsManager = com.example.util.TtsManager(context)
+
+        // 1. Storage Location: Must be in internal private filesDir/voice_library/, NOT external storage
+        val libraryDir = com.example.util.TtsManager.getVoiceLibraryDir(context)
+        assertTrue(libraryDir.exists())
+        assertTrue(libraryDir.isDirectory)
+        assertEquals(java.io.File(context.filesDir, "voice_library").absolutePath, libraryDir.absolutePath)
+        // Ensure .nomedia exists
+        assertTrue(java.io.File(libraryDir, ".nomedia").exists())
+
+        // Clear library initially
+        com.example.util.TtsManager.clearVoiceLibrary(context)
+        var stats = com.example.util.TtsManager.getVoiceLibraryStats(context)
+        assertEquals(0, stats.count)
+        assertEquals(0L, stats.totalBytes)
+
+        // 2. Per-text keying: Key depends on text + voice ONLY, invariant to playback speed
+        val testSentence = "Guten Morgen, wie geht es dir?"
+        val keySpeed1 = com.example.util.TtsManager.getVoiceLibraryKey(testSentence)
+        val keySpeed2 = com.example.util.TtsManager.getVoiceLibraryKey(testSentence)
+        assertEquals(keySpeed1, keySpeed2)
+        org.junit.Assert.assertFalse(keySpeed1.contains("speed"))
+
+        // Neutral prompt generator
+        val neutralPrompt = com.example.util.TtsManager.buildNeutralPrompt(testSentence)
+        assertTrue(neutralPrompt.contains("Hochdeutsch") || neutralPrompt.contains("normal native speed"))
+        assertTrue(neutralPrompt.contains(testSentence))
+
+        // 3. Storing a sentence in permanent library
+        val sentenceFile = java.io.File(libraryDir, "$keySpeed1.wav")
+        sentenceFile.writeBytes(ByteArray(1024 * 10)) // 10 KB dummy audio file
+
+        stats = com.example.util.TtsManager.getVoiceLibraryStats(context)
+        assertEquals(1, stats.count)
+        assertEquals(10240L, stats.totalBytes)
+
+        // 4. Checking that findStoredAudioFile finds it immediately for any speed
+        val foundFile05 = ttsManager.findStoredAudioFile(testSentence, 0.5f)
+        org.junit.Assert.assertNotNull(foundFile05)
+        assertEquals(sentenceFile.absolutePath, foundFile05?.absolutePath)
+
+        val foundFile15 = ttsManager.findStoredAudioFile(testSentence, 1.5f)
+        org.junit.Assert.assertNotNull(foundFile15)
+        assertEquals(sentenceFile.absolutePath, foundFile15?.absolutePath)
+
+        // 5. Library hit works even during complete quota cooldown
+        val futureTime = System.currentTimeMillis() + 3600_000L
+        progressManager.setTtsCooldown("gemini-2.5-flash-tts", futureTime)
+        progressManager.setTtsCooldown("gemini-2.5-flash-preview-tts", futureTime)
+        assertTrue(ttsManager.areAllTtsModelsInCooldown())
+
+        // Even with cooldown, findStoredAudioFile still finds it for instant replay without API call!
+        val hitDuringCooldown = ttsManager.findStoredAudioFile(testSentence, 1.0f)
+        org.junit.Assert.assertNotNull("Stored sentence must hit even during cooldown", hitDuringCooldown)
+        assertEquals(sentenceFile.absolutePath, hitDuringCooldown?.absolutePath)
+
+        // 6. Legacy cache fallback: speed-keyed file in cacheDir
+        val legacySentence = "Auf Wiedersehen!"
+        val legacyCacheDir = java.io.File(context.cacheDir, "gemini_tts_cache").apply { mkdirs() }
+        val legacyKey = com.example.util.TtsManager.getLegacyCacheKey(legacySentence, 1.25f)
+        val legacyFile = java.io.File(legacyCacheDir, "$legacyKey.wav")
+        legacyFile.writeBytes(ByteArray(512))
+
+        val foundLegacy = ttsManager.findStoredAudioFile(legacySentence, 1.25f)
+        org.junit.Assert.assertNotNull("Legacy speed-keyed cache file must be found as fallback", foundLegacy)
+        assertEquals(legacyFile.absolutePath, foundLegacy?.absolutePath)
+
+        // 7. Clear library
+        val cleared = com.example.util.TtsManager.clearVoiceLibrary(context)
+        assertTrue(cleared)
+        stats = com.example.util.TtsManager.getVoiceLibraryStats(context)
+        assertEquals(0, stats.count)
+        assertEquals(0L, stats.totalBytes)
+        org.junit.Assert.assertNull(ttsManager.findStoredAudioFile(testSentence, 1.0f))
+
+        // Cleanup
+        progressManager.clearTtsCooldowns()
+        legacyFile.delete()
+    }
 }

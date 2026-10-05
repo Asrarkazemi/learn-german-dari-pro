@@ -25,6 +25,9 @@ class UserProgressManager(context: Context) {
     private val _playbackSpeedFlow = MutableStateFlow(1.0f)
     val playbackSpeedFlow: StateFlow<Float> = _playbackSpeedFlow.asStateFlow()
 
+    private val _ttsCooldownActiveFlow = MutableStateFlow(false)
+    val ttsCooldownActiveFlow: StateFlow<Boolean> = _ttsCooldownActiveFlow.asStateFlow()
+
     init {
         loadData()
     }
@@ -36,6 +39,41 @@ class UserProgressManager(context: Context) {
         _quizzesTakenCountFlow.value = prefs.getInt(KEY_QUIZZES_TAKEN_COUNT, 0)
         _geminiApiKeyFlow.value = prefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
         _playbackSpeedFlow.value = prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
+        _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
+    }
+
+    fun areAllTtsModelsInCooldown(): Boolean {
+        val now = System.currentTimeMillis()
+        val tts1 = prefs.getLong("tts_cooldown_gemini-2.5-flash-tts", 0L)
+        val tts2 = prefs.getLong("tts_cooldown_gemini-2.5-flash-preview-tts", 0L)
+        return now < tts1 && now < tts2
+    }
+
+    fun isTtsModelInCooldown(model: String): Boolean {
+        val now = System.currentTimeMillis()
+        val until = prefs.getLong("tts_cooldown_$model", 0L)
+        return now < until
+    }
+
+    fun getTtsCooldownUntil(model: String): Long {
+        return prefs.getLong("tts_cooldown_$model", 0L)
+    }
+
+    fun setTtsCooldown(model: String, cooldownUntilEpochMs: Long) {
+        prefs.edit().putLong("tts_cooldown_$model", cooldownUntilEpochMs).apply()
+        _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
+    }
+
+    fun clearTtsCooldowns() {
+        prefs.edit()
+            .remove("tts_cooldown_gemini-2.5-flash-tts")
+            .remove("tts_cooldown_gemini-2.5-flash-preview-tts")
+            .apply()
+        _ttsCooldownActiveFlow.value = false
+    }
+
+    fun notifyTtsCooldownUpdated() {
+        _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
     }
 
     fun setPlaybackSpeed(speed: Float) {

@@ -130,7 +130,8 @@ fun MainScreen(
     var showVoiceSettingsDialog by remember { mutableStateOf(false) }
 
     val effectiveKey = progressManager.getEffectiveGeminiApiKey()
-    val isGeminiVoiceActive = effectiveKey.isNotEmpty()
+    val isTtsCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
+    val isGeminiVoiceActive = effectiveKey.isNotEmpty() && !isTtsCooldownActive
 
     // Always RTL layout for Dari UI
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
