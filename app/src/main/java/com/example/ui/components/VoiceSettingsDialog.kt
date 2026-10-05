@@ -1,6 +1,9 @@
 package com.example.ui.components
 
+import android.net.Uri
 import android.widget.Toast
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
@@ -22,8 +25,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material.icons.filled.FileOpen
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Info
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Speed
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.VisibilityOff
@@ -64,16 +69,21 @@ import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SuccessGreen
 import com.example.util.TtsManager
+import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
- * FIX K + ADDITION: Quota-aware VoiceSettingsDialog with:
+ * FIX K & FIX L: Quota-aware VoiceSettingsDialog with:
  * 1) Password-masked API key field with show/hide eye toggle
  * 2) Honest status chip: shows «صدا: گوشی» when in quota cooldown
  * 3) Prominent Dari note about quota limits and device voice fallback
  * 4) Test button with clean Dari error mapping (raw English errors excluded)
  * 5) PERMANENT VOICE LIBRARY: Live count & size «حافظهٔ صدا: N جمله ذخیره شده (X مگابایت)»
- *    plus «پاک کردن حافظهٔ صدا» button with confirmation dialog.
+ * 6) EXPORT VOICE LIBRARY: Button «خروجی گرفتن از حافظهٔ صدا» -> voice-library.zip share sheet
+ * 7) IMPORT VOICE LIBRARY: Button «وارد کردن حافظهٔ صدا» -> file picker + merge-by-filename + zip-slip defense
+ *    + exact Dari report: «N جملهٔ تازه اضافه شد — M جمله از قبل بود»
+ * 8) Clear library button with confirmation dialog
  */
 @Composable
 fun VoiceSettingsDialog(
@@ -91,6 +101,8 @@ fun VoiceSettingsDialog(
     var keyText by remember { mutableStateOf(currentKey) }
     var isKeyVisible by remember { mutableStateOf(false) }
     var isTesting by remember { mutableStateOf(false) }
+    var isExporting by remember { mutableStateOf(false) }
+    var isImporting by remember { mutableStateOf(false) }
     var testResultSuccess by remember { mutableStateOf<String?>(null) }
     var testResultError by remember { mutableStateOf<String?>(null) }
 
@@ -98,9 +110,59 @@ fun VoiceSettingsDialog(
     var libraryStats by remember { mutableStateOf(TtsManager.getVoiceLibraryStats(context)) }
     var showClearConfirmDialog by remember { mutableStateOf(false) }
 
+    // Import result report
+    var importReportMessage by remember { mutableStateOf<String?>(null) }
+    var isImportError by remember { mutableStateOf(false) }
+
     val hasKey = keyText.trim().isNotBlank()
     // Honest voice status: if in cooldown, voice is temporarily phone TTS
     val isGeminiVoiceActive = hasKey && !isCooldownActive
+
+    // File picker launcher for ZIP import
+    val openDocumentLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocument()
+    ) { uri: Uri? ->
+        if (uri != null) {
+            isImporting = true
+            importReportMessage = null
+            coroutineScope.launch(Dispatchers.IO) {
+                try {
+                    context.contentResolver.openInputStream(uri)?.use { inputStream ->
+                        val result = TtsManager.importVoiceLibraryFromZip(context, inputStream)
+                        withContext(Dispatchers.Main) {
+                            isImporting = false
+                            libraryStats = TtsManager.getVoiceLibraryStats(context)
+                            if (result.isSuccess) {
+                                val report = result.formatDariReport()
+                                importReportMessage = report
+                                isImportError = false
+                                Toast.makeText(context, report, Toast.LENGTH_LONG).show()
+                            } else {
+                                val err = result.errorMessage ?: "خطا در وارد کردن فایل زیپ."
+                                importReportMessage = err
+                                isImportError = true
+                                Toast.makeText(context, err, Toast.LENGTH_LONG).show()
+                            }
+                        }
+                    } ?: run {
+                        withContext(Dispatchers.Main) {
+                            isImporting = false
+                            importReportMessage = "خطا در باز کردن فایل زیپ انتخاب‌شده."
+                            isImportError = true
+                        }
+                    }
+                } catch (e: Exception) {
+                    withContext(Dispatchers.Main) {
+                        isImporting = false
+                        val errMsg = "فایل زیپ نامعتبر یا آسیب‌دیده است. حافظهٔ صدا بدون تغییر باقی ماند."
+                        importReportMessage = errMsg
+                        isImportError = true
+                        Toast.makeText(context, errMsg, Toast.LENGTH_LONG).show()
+                    }
+                }
+            }
+        }
+    }
 
     fun mapErrorToDari(rawError: String?): String {
         if (rawError.isNullOrBlank()) {
@@ -168,6 +230,7 @@ fun VoiceSettingsDialog(
                         showClearConfirmDialog = false
                         TtsManager.clearVoiceLibrary(context)
                         libraryStats = TtsManager.getVoiceLibraryStats(context)
+                        importReportMessage = null
                         Toast.makeText(context, "حافظهٔ صدای جیمنای با موفقیت پاک شد.", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
@@ -397,7 +460,7 @@ fun VoiceSettingsDialog(
                             }
                         }
                     },
-                    enabled = !isTesting,
+                    enabled = !isTesting && !isExporting && !isImporting,
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("btn_test_gemini_voice"),
@@ -493,7 +556,7 @@ fun VoiceSettingsDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // PERMANENT IN-APP VOICE LIBRARY SECTION
+                // PERMANENT IN-APP VOICE LIBRARY SECTION (FIX K & FIX L)
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -544,10 +607,138 @@ fun VoiceSettingsDialog(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // Button: «پاک کردن حافظهٔ صدا»
+                        // 1) EXPORT BUTTON: «خروجی گرفتن از حافظهٔ صدا»
+                        OutlinedButton(
+                            onClick = {
+                                if (libraryStats.count == 0) {
+                                    Toast.makeText(
+                                        context,
+                                        "حافظهٔ صدا خالی است؛ هنوز جمله‌ای برای خروجی گرفتن ذخیره نشده است.",
+                                        Toast.LENGTH_LONG
+                                    ).show()
+                                    return@OutlinedButton
+                                }
+                                isExporting = true
+                                coroutineScope.launch(Dispatchers.IO) {
+                                    val zipFile = TtsManager.exportVoiceLibraryToZip(context)
+                                    withContext(Dispatchers.Main) {
+                                        isExporting = false
+                                        if (zipFile != null && zipFile.exists() && zipFile.length() > 0) {
+                                            TtsManager.shareVoiceLibraryZip(context, zipFile)
+                                        } else {
+                                            Toast.makeText(
+                                                context,
+                                                "خطا در ایجاد فایل زیپ خروجی.",
+                                                Toast.LENGTH_SHORT
+                                            ).show()
+                                        }
+                                    }
+                                }
+                            },
+                            enabled = !isTesting && !isExporting && !isImporting,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("btn_export_voice_library"),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            if (isExporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("در حال آماده‌سازی فایل زیپ...", fontSize = 12.sp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.Share,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "خروجی گرفتن از حافظهٔ صدا",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // 2) IMPORT BUTTON: «وارد کردن حافظهٔ صدا»
+                        OutlinedButton(
+                            onClick = {
+                                importReportMessage = null
+                                openDocumentLauncher.launch(
+                                    arrayOf(
+                                        "application/zip",
+                                        "application/x-zip-compressed",
+                                        "application/octet-stream"
+                                    )
+                                )
+                            },
+                            enabled = !isTesting && !isExporting && !isImporting,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("btn_import_voice_library"),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            if (isImporting) {
+                                CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text("در حال استخراج و افزودن جملات...", fontSize = 12.sp)
+                            } else {
+                                Icon(
+                                    imageVector = Icons.Default.FileOpen,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "وارد کردن حافظهٔ صدا",
+                                    fontSize = 12.sp,
+                                    fontWeight = FontWeight.Bold
+                                )
+                            }
+                        }
+
+                        // 3) DARI REPORT CARD: «N جملهٔ تازه اضافه شد — M جمله از قبل بود»
+                        AnimatedVisibility(visible = importReportMessage != null) {
+                            importReportMessage?.let { reportText ->
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = if (!isImportError) SuccessGreen.copy(alpha = 0.12f) else ErrorRed.copy(alpha = 0.12f),
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .padding(top = 8.dp)
+                                        .testTag("import_report_card")
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(10.dp),
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Icon(
+                                            imageVector = if (!isImportError) Icons.Default.CheckCircle else Icons.Default.Warning,
+                                            contentDescription = null,
+                                            tint = if (!isImportError) SuccessGreen else ErrorRed,
+                                            modifier = Modifier.size(18.dp)
+                                        )
+                                        Spacer(modifier = Modifier.width(8.dp))
+                                        Text(
+                                            text = reportText,
+                                            color = if (!isImportError) SuccessGreen else ErrorRed,
+                                            fontSize = 12.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            modifier = Modifier.testTag("import_report_text")
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.height(6.dp))
+
+                        // 4) CLEAR BUTTON: «پاک کردن حافظهٔ صدا»
                         OutlinedButton(
                             onClick = { showClearConfirmDialog = true },
-                            enabled = libraryStats.count > 0 && !isTesting,
+                            enabled = libraryStats.count > 0 && !isTesting && !isExporting && !isImporting,
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .testTag("btn_clear_voice_library"),

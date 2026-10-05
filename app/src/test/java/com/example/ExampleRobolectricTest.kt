@@ -669,4 +669,117 @@ class ExampleRobolectricTest {
         progressManager.clearTtsCooldowns()
         legacyFile.delete()
     }
+
+    @Test
+    fun `verify FIX L voice library export, import merge-by-filename, zip-slip defense, and Dari report`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val libraryDir = com.example.util.TtsManager.getVoiceLibraryDir(context)
+
+        // Clear library
+        com.example.util.TtsManager.clearVoiceLibrary(context)
+        assertEquals(0, com.example.util.TtsManager.getVoiceLibraryStats(context).count)
+
+        // 1. Export when library is empty returns null
+        val emptyExport = com.example.util.TtsManager.exportVoiceLibraryToZip(context)
+        org.junit.Assert.assertNull(emptyExport)
+
+        // 2. Add an existing sentence to library
+        val existingSentence = "Hallo, wie geht es dir?"
+        val existingKey = com.example.util.TtsManager.getVoiceLibraryKey(existingSentence)
+        val existingFile = java.io.File(libraryDir, "$existingKey.wav")
+        existingFile.writeBytes(ByteArray(1024) { 1 }) // 1 KB dummy audio
+        assertEquals(1, com.example.util.TtsManager.getVoiceLibraryStats(context).count)
+
+        // 3. Export with files creates valid voice-library.zip
+        val exportedZip = com.example.util.TtsManager.exportVoiceLibraryToZip(context)
+        org.junit.Assert.assertNotNull(exportedZip)
+        assertTrue(exportedZip!!.exists())
+        assertEquals("voice-library.zip", exportedZip.name)
+        assertTrue(exportedZip.length() > 0)
+
+        // Verify FileProvider can generate URI for exported zip
+        val uri = androidx.core.content.FileProvider.getUriForFile(
+            context,
+            "${context.packageName}.fileprovider",
+            exportedZip
+        )
+        org.junit.Assert.assertNotNull(uri)
+        assertTrue(uri.toString().contains("voice-library.zip"))
+
+        // 4. Create an incoming ZIP file with:
+        //    - existingKey.wav (should be SKIPPED)
+        //    - newSentence1.wav (should be ADDED)
+        //    - newSentence2.wav (should be ADDED)
+        //    - ../../malicious/hack.wav (zip-slip attempt, should be REJECTED/SKIPPED)
+        val newKey1 = com.example.util.TtsManager.getVoiceLibraryKey("Ich lerne Deutsch.")
+        val newKey2 = com.example.util.TtsManager.getVoiceLibraryKey("Danke schön!")
+        val baos = java.io.ByteArrayOutputStream()
+        java.util.zip.ZipOutputStream(baos).use { zos ->
+            // Entry 1: existing
+            zos.putNextEntry(java.util.zip.ZipEntry("$existingKey.wav"))
+            zos.write(ByteArray(2048) { 99 }) // different content to prove it won't overwrite
+            zos.closeEntry()
+
+            // Entry 2: new file 1
+            zos.putNextEntry(java.util.zip.ZipEntry("$newKey1.wav"))
+            zos.write(ByteArray(512) { 2 })
+            zos.closeEntry()
+
+            // Entry 3: new file 2
+            zos.putNextEntry(java.util.zip.ZipEntry("$newKey2.wav"))
+            zos.write(ByteArray(512) { 3 })
+            zos.closeEntry()
+
+            // Entry 4: zip-slip attack
+            zos.putNextEntry(java.util.zip.ZipEntry("../../bad.wav"))
+            zos.write(ByteArray(128))
+            zos.closeEntry()
+        }
+
+        val incomingBytes = baos.toByteArray()
+
+        // 5. Test import with merge-by-filename
+        val importResult = com.example.util.TtsManager.importVoiceLibraryFromZip(
+            context,
+            java.io.ByteArrayInputStream(incomingBytes)
+        )
+
+        assertTrue(importResult.isSuccess)
+        assertEquals(2, importResult.addedCount)
+        assertEquals(1, importResult.skippedCount)
+
+        // Exact Dari report format: «N جملهٔ تازه اضافه شد — M جمله از قبل بود» in Persian digits
+        val expectedReport = "۲ جملهٔ تازه اضافه شد — ۱ جمله از قبل بود"
+        assertEquals(expectedReport, importResult.formatDariReport())
+
+        // Verify library stats updated
+        val updatedStats = com.example.util.TtsManager.getVoiceLibraryStats(context)
+        assertEquals(3, updatedStats.count)
+
+        // Verify existing file was NOT overwritten (size should still be 1024, not 2048)
+        assertEquals(1024L, existingFile.length())
+
+        // Verify new files exist
+        assertTrue(java.io.File(libraryDir, "$newKey1.wav").exists())
+        assertTrue(java.io.File(libraryDir, "$newKey2.wav").exists())
+
+        // Verify zip-slip file was NOT created anywhere outside
+        org.junit.Assert.assertFalse(java.io.File(context.filesDir, "bad.wav").exists())
+        org.junit.Assert.assertFalse(java.io.File(libraryDir, "bad.wav").exists())
+
+        // 6. Test corrupt / invalid ZIP
+        val corruptBytes = byteArrayOf(1, 2, 3, 4, 5, 6, 7, 8)
+        val corruptResult = com.example.util.TtsManager.importVoiceLibraryFromZip(
+            context,
+            java.io.ByteArrayInputStream(corruptBytes)
+        )
+        org.junit.Assert.assertFalse(corruptResult.isSuccess)
+        org.junit.Assert.assertNotNull(corruptResult.errorMessage)
+        // Library remains completely untouched
+        assertEquals(3, com.example.util.TtsManager.getVoiceLibraryStats(context).count)
+
+        // Cleanup
+        com.example.util.TtsManager.clearVoiceLibrary(context)
+        exportedZip.delete()
+    }
 }

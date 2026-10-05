@@ -695,6 +695,19 @@ class TtsManager(
             get() = String.format(Locale.US, "%.1f", sizeMb)
     }
 
+    data class VoiceLibraryImportResult(
+        val isSuccess: Boolean,
+        val addedCount: Int = 0,
+        val skippedCount: Int = 0,
+        val errorMessage: String? = null
+    ) {
+        fun formatDariReport(): String {
+            val addedPersian = toPersianDigits("$addedCount")
+            val skippedPersian = toPersianDigits("$skippedCount")
+            return "$addedPersian جملهٔ تازه اضافه شد — $skippedPersian جمله از قبل بود"
+        }
+    }
+
     companion object {
         const val PRIMARY_TTS_MODEL = "gemini-2.5-flash-tts"
         const val SECONDARY_TTS_MODEL = "gemini-2.5-flash-preview-tts"
@@ -859,6 +872,189 @@ class TtsManager(
             }
 
             return 12L * 3600_000L
+        }
+
+        fun toPersianDigits(input: String): String {
+            return input
+                .replace('0', '۰')
+                .replace('1', '۱')
+                .replace('2', '۲')
+                .replace('3', '۳')
+                .replace('4', '۴')
+                .replace('5', '۵')
+                .replace('6', '۶')
+                .replace('7', '۷')
+                .replace('8', '۸')
+                .replace('9', '۹')
+        }
+
+        /**
+         * Packs all files of the internal voice_library folder into ONE ZIP file (voice-library.zip)
+         * in a temporary/shareable location (cacheDir/exports/).
+         * Returns null if the library is empty or export fails.
+         */
+        fun exportVoiceLibraryToZip(context: Context): File? {
+            val libraryDir = getVoiceLibraryDir(context)
+            val files = libraryDir.listFiles { file ->
+                file.isFile && file.extension.equals("wav", ignoreCase = true) && !file.name.equals(".nomedia")
+            } ?: emptyArray()
+
+            if (files.isEmpty()) {
+                return null
+            }
+
+            val exportDir = File(context.cacheDir, "exports").apply { mkdirs() }
+            val zipFile = File(exportDir, "voice-library.zip")
+            if (zipFile.exists()) {
+                zipFile.delete()
+            }
+
+            return try {
+                java.util.zip.ZipOutputStream(java.io.BufferedOutputStream(java.io.FileOutputStream(zipFile))).use { zipOut ->
+                    val buffer = ByteArray(8192)
+                    for (file in files) {
+                        val entry = java.util.zip.ZipEntry(file.name)
+                        zipOut.putNextEntry(entry)
+                        file.inputStream().use { input ->
+                            var bytesRead: Int
+                            while (input.read(buffer).also { bytesRead = it } != -1) {
+                                zipOut.write(buffer, 0, bytesRead)
+                            }
+                        }
+                        zipOut.closeEntry()
+                    }
+                }
+                if (zipFile.exists() && zipFile.length() > 0) zipFile else null
+            } catch (e: Exception) {
+                Log.e("TtsManager", "Failed to export voice library to zip: ${e.message}", e)
+                null
+            }
+        }
+
+        /**
+         * Unzips incoming ZIP into the internal voice_library folder with MERGE-BY-FILENAME semantics:
+         * Incoming files whose names already exist are SKIPPED (never duplicated, never overwritten).
+         * Defends against zip-slip paths.
+         * If the ZIP is invalid/corrupt, leaves the library completely untouched.
+         */
+        fun importVoiceLibraryFromZip(context: Context, inputStream: java.io.InputStream): VoiceLibraryImportResult {
+            val libraryDir = getVoiceLibraryDir(context)
+            val tempDir = File(context.cacheDir, "temp_voice_import_${System.currentTimeMillis()}").apply { mkdirs() }
+
+            try {
+                var hasValidWavFiles = false
+                java.util.zip.ZipInputStream(java.io.BufferedInputStream(inputStream)).use { zipIn ->
+                    val buffer = ByteArray(8192)
+                    var entry = zipIn.nextEntry
+                    while (entry != null) {
+                        val name = entry.name
+                        // Zip-slip defense: reject or skip any entry with directory traversal or absolute paths
+                        if (entry.isDirectory ||
+                            name.contains("..") ||
+                            name.startsWith("/") ||
+                            name.startsWith("\\") ||
+                            name.contains(":") ||
+                            name.startsWith("__MACOSX") ||
+                            name.endsWith(".DS_Store")
+                        ) {
+                            zipIn.closeEntry()
+                            entry = zipIn.nextEntry
+                            continue
+                        }
+
+                        val safeFileName = File(name).name
+                        if (!safeFileName.endsWith(".wav", ignoreCase = true)) {
+                            zipIn.closeEntry()
+                            entry = zipIn.nextEntry
+                            continue
+                        }
+
+                        val destFile = File(tempDir, safeFileName)
+                        // Canonical path check for absolute zip-slip protection
+                        if (!destFile.canonicalPath.startsWith(tempDir.canonicalPath)) {
+                            zipIn.closeEntry()
+                            entry = zipIn.nextEntry
+                            continue
+                        }
+
+                        destFile.outputStream().use { fileOut ->
+                            var bytesRead: Int
+                            while (zipIn.read(buffer).also { bytesRead = it } != -1) {
+                                fileOut.write(buffer, 0, bytesRead)
+                            }
+                        }
+                        zipIn.closeEntry()
+                        if (destFile.length() > 0) {
+                            hasValidWavFiles = true
+                        } else {
+                            destFile.delete()
+                        }
+                        entry = zipIn.nextEntry
+                    }
+                }
+
+                if (!hasValidWavFiles) {
+                    tempDir.deleteRecursively()
+                    return VoiceLibraryImportResult(
+                        isSuccess = false,
+                        errorMessage = "هیچ فایل صوتی معتبری (.wav) در این فایل زیپ یافت نشد."
+                    )
+                }
+
+                // Merge-by-filename into internal voice library
+                val extractedFiles = tempDir.listFiles { f -> f.isFile && f.extension.equals("wav", ignoreCase = true) } ?: emptyArray()
+                var addedCount = 0
+                var skippedCount = 0
+
+                for (file in extractedFiles) {
+                    val targetFile = File(libraryDir, file.name)
+                    if (targetFile.exists() && targetFile.length() > 0) {
+                        // Already exists in library -> SKIPPED
+                        skippedCount++
+                    } else {
+                        // New file -> add to library
+                        file.copyTo(targetFile, overwrite = false)
+                        addedCount++
+                    }
+                }
+
+                tempDir.deleteRecursively()
+                return VoiceLibraryImportResult(
+                    isSuccess = true,
+                    addedCount = addedCount,
+                    skippedCount = skippedCount
+                )
+            } catch (e: Exception) {
+                Log.e("TtsManager", "Error importing voice library: ${e.message}", e)
+                tempDir.deleteRecursively()
+                return VoiceLibraryImportResult(
+                    isSuccess = false,
+                    errorMessage = "فایل زیپ نامعتبر یا آسیب‌دیده است. حافظهٔ صدا بدون تغییر باقی ماند."
+                )
+            }
+        }
+
+        fun shareVoiceLibraryZip(context: Context, zipFile: File) {
+            try {
+                val uri = androidx.core.content.FileProvider.getUriForFile(
+                    context,
+                    "${context.packageName}.fileprovider",
+                    zipFile
+                )
+                val shareIntent = android.content.Intent(android.content.Intent.ACTION_SEND).apply {
+                    type = "application/zip"
+                    putExtra(android.content.Intent.EXTRA_STREAM, uri)
+                    putExtra(android.content.Intent.EXTRA_SUBJECT, "خروجی حافظهٔ صدای جیمنای - voice-library.zip")
+                    addFlags(android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                }
+                val chooser = android.content.Intent.createChooser(shareIntent, "ارسال یا ذخیرهٔ فایل حافظهٔ صدا").apply {
+                    addFlags(android.content.Intent.FLAG_ACTIVITY_NEW_TASK)
+                }
+                context.startActivity(chooser)
+            } catch (e: Exception) {
+                Log.e("TtsManager", "Error sharing voice library zip: ${e.message}", e)
+                Toast.makeText(context, "خطا در اشتراک‌گذاری فایل: ${e.localizedMessage}", Toast.LENGTH_LONG).show()
+            }
         }
     }
 }
