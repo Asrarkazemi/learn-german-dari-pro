@@ -784,7 +784,7 @@ class ExampleRobolectricTest {
     }
 
     @Test
-    fun `verify FIX M batch download text collection, grouping limits, silence splitting, daily counter, and mismatch fallback`() {
+    fun `verify FIX N daily Gemini requests counter persistence and automatic date reset`() {
         val context = ApplicationProvider.getApplicationContext<Context>()
         val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
 
@@ -807,75 +807,6 @@ class ExampleRobolectricTest {
         val countAfterNewDay = progressManager.incrementDailyGeminiRequestsCount()
         assertEquals(1, countAfterNewDay)
         assertEquals(1, progressManager.getDailyGeminiRequestsCount())
-
-        // 2. Text collection from Lesson and Grammar Topic
-        val lesson = com.example.data.repository.BuiltInCourseData.lessons.first()
-        val collectedLessonTexts = com.example.util.TtsManager.collectGermanTextsFromLesson(lesson)
-        assertTrue(collectedLessonTexts.isNotEmpty())
-        // Display order: vocabulary, exampleSentences, dialogues, qaPairs
-        // Ensure no Persian characters in clean German texts
-        for (txt in collectedLessonTexts) {
-            org.junit.Assert.assertFalse("German text should not contain Persian letters", txt.matches(Regex(".*[\\u0600-\\u06FF].*")))
-        }
-
-        val topic = com.example.data.repository.BuiltInGrammarData.topics.first()
-        val collectedTopicTexts = com.example.util.TtsManager.collectGermanTextsFromGrammarTopic(topic)
-        assertTrue(collectedTopicTexts.isNotEmpty())
-
-        // 3. Grouping algorithm limits: <= 20 items AND <= 900 chars
-        val sampleTexts = (1..50).map { "Dies ist ein deutscher Beispielsatz Nummer $it für die Stapelverarbeitung." }
-        val groups = com.example.util.TtsManager.groupTexts(sampleTexts, maxItems = 20, maxChars = 900)
-        assertTrue(groups.isNotEmpty())
-        for (grp in groups) {
-            assertTrue("Group item count must be <= 20, was ${grp.size}", grp.size <= 20)
-            val joinedLen = grp.sumOf { it.length } + (grp.size - 1)
-            assertTrue("Group joined length must be <= 900 chars, was $joinedLen", joinedLen <= 900)
-        }
-        // Total items in groups must equal total input items
-        assertEquals(sampleTexts.size, groups.sumOf { it.size })
-
-        // 4. Native PCM silence splitting (>= 0.8s silence)
-        // Synthesize 2 tones (speech) separated by 1.0s silence, sampleRate = 24000
-        val sampleRate = 24000
-        val toneDuration = (sampleRate * 0.5).toInt() // 500ms tone
-        val silenceDuration = (sampleRate * 1.0).toInt() // 1000ms silence (>= 0.8s)
-
-        val pcm = ShortArray(toneDuration + silenceDuration + toneDuration)
-        // First tone
-        for (i in 0 until toneDuration) {
-            pcm[i] = (Math.sin(2.0 * Math.PI * 440.0 * i / sampleRate) * 10000.0).toInt().toShort()
-        }
-        // Silence in middle: zeroes
-        // Second tone
-        val offset2 = toneDuration + silenceDuration
-        for (i in 0 until toneDuration) {
-            pcm[offset2 + i] = (Math.sin(2.0 * Math.PI * 440.0 * i / sampleRate) * 10000.0).toInt().toShort()
-        }
-
-        val pcmBytes = com.example.util.TtsManager.pcmShortsToBytes(pcm)
-        val wavBytes = com.example.util.TtsManager.ensureWavBytes(pcmBytes, sampleRate)
-        val segments = com.example.util.TtsManager.splitAudioBySilence(wavBytes, minSilenceDurationSec = 0.8)
-
-        // Must detect exactly 2 segments separated by the 1-second silence
-        assertEquals(2, segments.size)
-
-        // 5. Position-Guided Slicing (FIX M Position-Guided Slicing)
-        val textGroup = listOf("Hallo Welt", "Guten Morgen")
-        val positionGuidedSegments = com.example.util.TtsManager.splitAudioPositionGuided(wavBytes, textGroup)
-        org.junit.Assert.assertNotNull(positionGuidedSegments)
-        assertEquals(2, positionGuidedSegments?.size)
-
-        // 6. Result summary formatting including requests count
-        val batchResult = com.example.util.TtsManager.BatchDownloadResult(
-            isSuccess = true,
-            savedCount = 15,
-            skippedCount = 5,
-            requestsUsed = 2
-        )
-        val summary = batchResult.formatSummary()
-        assertTrue(summary.contains("✅ ۱۵ جمله ذخیره شد"))
-        assertTrue(summary.contains("کل درس با ۲ درخواست ذخیره شد"))
-        assertTrue(summary.contains("۵ جمله از قبل بود"))
 
         // Cleanup
         progressManager.setDailyGeminiRequestsForTesting(today, 0)

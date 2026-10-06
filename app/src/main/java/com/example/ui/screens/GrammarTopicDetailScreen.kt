@@ -128,18 +128,6 @@ fun GrammarTopicDetailScreen(
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
             ) {
-                // FIX M: Prominent one-tap batch voice download button at the TOP of the grammar topic detail screen
-                item {
-                    val context = androidx.compose.ui.platform.LocalContext.current
-                    val actualTtsManager = ttsManager ?: remember { com.example.util.TtsManager(context) }
-                    com.example.ui.components.BatchVoiceDownloadButton(
-                        onStartDownload = { onProgress ->
-                            val texts = com.example.util.TtsManager.collectGermanTextsFromGrammarTopic(topic)
-                            actualTtsManager.batchDownloadTexts(texts, onProgress)
-                        }
-                    )
-                }
-
                 // Topic Overview Header Banner
                 item {
                     Card(
