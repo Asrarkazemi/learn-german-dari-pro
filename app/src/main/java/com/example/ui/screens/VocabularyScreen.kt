@@ -89,6 +89,7 @@ fun VocabularyScreen(
     onToggleLearned: (String, Boolean) -> Unit,
     onPlayAudio: (String, Boolean) -> Unit, // text, isSlow
     initialSection: Int = 0,
+    ttsManager: com.example.util.TtsManager? = null,
     modifier: Modifier = Modifier
 ) {
     if (allLessons.isEmpty()) {
@@ -161,6 +162,18 @@ fun VocabularyScreen(
                     )
                 }
             }
+        }
+
+        // FIX M: Prominent one-tap batch voice download button at the TOP of the lesson detail screen
+        val context = androidx.compose.ui.platform.LocalContext.current
+        val actualTtsManager = ttsManager ?: remember { com.example.util.TtsManager(context) }
+        Box(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+            com.example.ui.components.BatchVoiceDownloadButton(
+                onStartDownload = { onProgress ->
+                    val texts = com.example.util.TtsManager.collectGermanTextsFromLesson(currentLesson)
+                    actualTtsManager.batchDownloadTexts(texts, onProgress)
+                }
+            )
         }
 
         // CHANGE 1: Restructure each lesson screen into 4 clear sections

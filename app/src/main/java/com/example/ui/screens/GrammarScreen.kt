@@ -68,6 +68,7 @@ fun GrammarScreen(
     onDeleteCustomTopic: (String) -> Unit,
     onPlayAudio: (String, Boolean) -> Unit,
     onNavigateToLessons: (() -> Unit)? = null,
+    ttsManager: com.example.util.TtsManager? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -81,7 +82,8 @@ fun GrammarScreen(
         GrammarTopicDetailScreen(
             topic = selectedTopic,
             onBack = { selectedTopicId = null },
-            onPlayAudio = onPlayAudio
+            onPlayAudio = onPlayAudio,
+            ttsManager = ttsManager
         )
         return
     }

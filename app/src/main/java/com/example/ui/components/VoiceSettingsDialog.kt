@@ -97,6 +97,7 @@ fun VoiceSettingsDialog(
     val progressManager = remember { UserProgressManager.getInstance(context) }
     val currentSpeed by progressManager.playbackSpeedFlow.collectAsState()
     val isCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
+    val dailyRequestsCount by progressManager.dailyGeminiRequestsFlow.collectAsState()
 
     var keyText by remember { mutableStateOf(currentKey) }
     var isKeyVisible by remember { mutableStateOf(false) }
@@ -347,6 +348,23 @@ fun VoiceSettingsDialog(
                             color = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
+                }
+
+                // FIX M: Daily Gemini API requests counter
+                Spacer(modifier = Modifier.height(4.dp))
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    val dailyPersian = UserProgressManager.toPersianDigits("$dailyRequestsCount")
+                    Text(
+                        text = "درخواست\u200Cهای امروز به جیمنای: $dailyPersian",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = FontWeight.Medium,
+                        modifier = Modifier.testTag("daily_gemini_requests_text")
+                    )
                 }
 
                 // QUOTA COOLDOWN NOTE: Clear Dari explanation when quota is exhausted

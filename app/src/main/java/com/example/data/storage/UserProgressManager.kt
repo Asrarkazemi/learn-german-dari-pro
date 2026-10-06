@@ -28,6 +28,9 @@ class UserProgressManager(context: Context) {
     private val _ttsCooldownActiveFlow = MutableStateFlow(false)
     val ttsCooldownActiveFlow: StateFlow<Boolean> = _ttsCooldownActiveFlow.asStateFlow()
 
+    private val _dailyGeminiRequestsFlow = MutableStateFlow(0)
+    val dailyGeminiRequestsFlow: StateFlow<Int> = _dailyGeminiRequestsFlow.asStateFlow()
+
     init {
         loadData()
     }
@@ -40,6 +43,45 @@ class UserProgressManager(context: Context) {
         _geminiApiKeyFlow.value = prefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
         _playbackSpeedFlow.value = prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
         _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
+        _dailyGeminiRequestsFlow.value = getDailyGeminiRequestsCount()
+    }
+
+    fun getTodayDateKey(): String {
+        return java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US).format(java.util.Date())
+    }
+
+    fun getDailyGeminiRequestsCount(): Int {
+        val today = getTodayDateKey()
+        val savedDate = prefs.getString("daily_tts_requests_date", "")
+        val count = if (savedDate == today) {
+            prefs.getInt("daily_tts_requests_count", 0)
+        } else {
+            0
+        }
+        _dailyGeminiRequestsFlow.value = count
+        return count
+    }
+
+    @Synchronized
+    fun incrementDailyGeminiRequestsCount(): Int {
+        val today = getTodayDateKey()
+        val savedDate = prefs.getString("daily_tts_requests_date", "")
+        val current = if (savedDate == today) prefs.getInt("daily_tts_requests_count", 0) else 0
+        val newCount = current + 1
+        prefs.edit()
+            .putString("daily_tts_requests_date", today)
+            .putInt("daily_tts_requests_count", newCount)
+            .commit()
+        _dailyGeminiRequestsFlow.value = newCount
+        return newCount
+    }
+
+    fun setDailyGeminiRequestsForTesting(date: String, count: Int) {
+        prefs.edit()
+            .putString("daily_tts_requests_date", date)
+            .putInt("daily_tts_requests_count", count)
+            .commit()
+        _dailyGeminiRequestsFlow.value = if (date == getTodayDateKey()) count else 0
     }
 
     fun areAllTtsModelsInCooldown(): Boolean {
@@ -168,6 +210,20 @@ class UserProgressManager(context: Context) {
 
         val SUPPORTED_SPEEDS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
 
+        fun toPersianDigits(input: String): String {
+            return input
+                .replace('0', '۰')
+                .replace('1', '۱')
+                .replace('2', '۲')
+                .replace('3', '۳')
+                .replace('4', '۴')
+                .replace('5', '۵')
+                .replace('6', '۶')
+                .replace('7', '۷')
+                .replace('8', '۸')
+                .replace('9', '۹')
+        }
+
         fun formatSpeedToPersian(speed: Float): String {
             return when (speed) {
                 0.5f -> "۰.۵x"
@@ -175,17 +231,7 @@ class UserProgressManager(context: Context) {
                 1.0f -> "۱.۰x"
                 1.25f -> "۱.۲۵x"
                 1.5f -> "۱.۵x"
-                else -> "${speed}x"
-                    .replace('0', '۰')
-                    .replace('1', '۱')
-                    .replace('2', '۲')
-                    .replace('3', '۳')
-                    .replace('4', '۴')
-                    .replace('5', '۵')
-                    .replace('6', '۶')
-                    .replace('7', '۷')
-                    .replace('8', '۸')
-                    .replace('9', '۹')
+                else -> toPersianDigits("${speed}x")
             }
         }
 

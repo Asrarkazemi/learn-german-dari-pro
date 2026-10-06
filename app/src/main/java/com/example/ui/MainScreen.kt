@@ -303,7 +303,8 @@ fun MainScreen(
                                 onImportJson = { json -> grammarRepository.importJson(json) },
                                 onDeleteCustomTopic = { topicId -> grammarRepository.deleteCustomTopic(topicId) },
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
-                                onNavigateToLessons = { currentTab = NavDestination.HOME }
+                                onNavigateToLessons = { currentTab = NavDestination.HOME },
+                                ttsManager = ttsManager
                             )
                         }
 
@@ -321,7 +322,8 @@ fun MainScreen(
                                     progressManager.setWordLearned(wordKey, learned)
                                 },
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
-                                initialSection = selectedLessonSection
+                                initialSection = selectedLessonSection,
+                                ttsManager = ttsManager
                             )
                         }
 
