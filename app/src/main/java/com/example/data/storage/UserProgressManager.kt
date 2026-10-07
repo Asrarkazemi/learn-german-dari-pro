@@ -31,6 +31,12 @@ class UserProgressManager(context: Context) {
     private val _dailyGeminiRequestsFlow = MutableStateFlow(0)
     val dailyGeminiRequestsFlow: StateFlow<Int> = _dailyGeminiRequestsFlow.asStateFlow()
 
+    private val _studyDaysFlow = MutableStateFlow<Set<String>>(emptySet())
+    val studyDaysFlow: StateFlow<Set<String>> = _studyDaysFlow.asStateFlow()
+
+    private val _studyStreakFlow = MutableStateFlow(0)
+    val studyStreakFlow: StateFlow<Int> = _studyStreakFlow.asStateFlow()
+
     init {
         loadData()
     }
@@ -44,6 +50,10 @@ class UserProgressManager(context: Context) {
         _playbackSpeedFlow.value = prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
         _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
         _dailyGeminiRequestsFlow.value = getDailyGeminiRequestsCount()
+
+        val studyDays = prefs.getStringSet(KEY_STUDY_DAYS, emptySet()) ?: emptySet()
+        _studyDaysFlow.value = studyDays
+        _studyStreakFlow.value = calculateStreak(studyDays)
     }
 
     fun getTodayDateKey(): String {
@@ -163,6 +173,7 @@ class UserProgressManager(context: Context) {
         } else {
             current.add(wordId)
             isNowLearned = true
+            recordStudyDay()
         }
         prefs.edit().putStringSet(KEY_LEARNED_WORDS, current).apply()
         _learnedWordsFlow.value = current
@@ -173,6 +184,7 @@ class UserProgressManager(context: Context) {
         val current = _learnedWordsFlow.value.toMutableSet()
         if (learned) {
             current.add(wordId)
+            recordStudyDay()
         } else {
             current.remove(wordId)
         }
@@ -180,7 +192,74 @@ class UserProgressManager(context: Context) {
         _learnedWordsFlow.value = current
     }
 
+    fun recordStudyDay(date: String = getTodayDateKey()): Int {
+        val current = _studyDaysFlow.value.toMutableSet()
+        val added = current.add(date)
+        val newStreak = calculateStreak(current)
+        if (added) {
+            prefs.edit().putStringSet(KEY_STUDY_DAYS, current).apply()
+            _studyDaysFlow.value = current
+            _studyStreakFlow.value = newStreak
+        } else {
+            _studyStreakFlow.value = newStreak
+        }
+        return newStreak
+    }
+
+    fun getStudyStreak(): Int = _studyStreakFlow.value
+
+    fun isTodayStudied(todayDateStr: String = getTodayDateKey()): Boolean {
+        return _studyDaysFlow.value.contains(todayDateStr)
+    }
+
+    fun setStudyDaysForTesting(days: Set<String>, todayDateStr: String = getTodayDateKey()) {
+        prefs.edit().putStringSet(KEY_STUDY_DAYS, days).apply()
+        _studyDaysFlow.value = days
+        _studyStreakFlow.value = calculateStreak(days, todayDateStr)
+    }
+
+    fun calculateStreak(studyDays: Set<String>, todayDateStr: String = getTodayDateKey()): Int {
+        if (studyDays.isEmpty()) return 0
+
+        val dateFormat = java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.US)
+        val cal = java.util.Calendar.getInstance()
+        try {
+            val parsed = dateFormat.parse(todayDateStr)
+            if (parsed != null) {
+                cal.time = parsed
+            }
+        } catch (e: Exception) {
+            // fallback to current system time
+        }
+
+        val todayFormatted = dateFormat.format(cal.time)
+        val studiedToday = studyDays.contains(todayFormatted)
+
+        if (!studiedToday) {
+            // Check yesterday
+            cal.add(java.util.Calendar.DAY_OF_YEAR, -1)
+            val yesterdayFormatted = dateFormat.format(cal.time)
+            if (!studyDays.contains(yesterdayFormatted)) {
+                return 0
+            }
+            // Yesterday is the start of the consecutive streak ending yesterday
+        }
+
+        var streak = 0
+        while (true) {
+            val checkDate = dateFormat.format(cal.time)
+            if (studyDays.contains(checkDate)) {
+                streak++
+                cal.add(java.util.Calendar.DAY_OF_YEAR, -1)
+            } else {
+                break
+            }
+        }
+        return streak
+    }
+
     fun saveQuizResult(score: Int, total: Int) {
+        recordStudyDay()
         val currentHigh = _quizHighScoreFlow.value
         val newHigh = maxOf(currentHigh, score)
         val newCount = _quizzesTakenCountFlow.value + 1
@@ -199,6 +278,8 @@ class UserProgressManager(context: Context) {
         _learnedWordsFlow.value = emptySet()
         _quizHighScoreFlow.value = 0
         _quizzesTakenCountFlow.value = 0
+        _studyDaysFlow.value = emptySet()
+        _studyStreakFlow.value = 0
     }
 
     companion object {
@@ -207,6 +288,7 @@ class UserProgressManager(context: Context) {
         private const val KEY_QUIZZES_TAKEN_COUNT = "quizzes_taken_count"
         private const val KEY_GEMINI_API_KEY = "gemini_api_key"
         private const val KEY_PLAYBACK_SPEED = "playback_speed"
+        private const val KEY_STUDY_DAYS = "study_days"
 
         val SUPPORTED_SPEEDS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
 

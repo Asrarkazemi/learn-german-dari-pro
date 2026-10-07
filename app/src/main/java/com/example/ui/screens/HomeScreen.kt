@@ -36,6 +36,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -47,6 +48,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -65,11 +67,13 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.LessonData
 import com.example.data.repository.BatchImportResult
+import com.example.data.storage.UserProgressManager
 import com.example.ui.components.ImportLessonDialog
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.HeaderNavyGradient
 import com.example.ui.theme.IndigoPrimary
+import com.example.ui.theme.SuccessGreen
 
 enum class HomeLibraryTab {
     LESSONS,       // درس‌ها (Main course)
@@ -100,6 +104,10 @@ fun HomeScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    val studyStreak by progressManager.studyStreakFlow.collectAsState()
+    val isStudiedToday = progressManager.isTodayStudied()
+
     var selectedLibraryTab by remember(initialLibraryTab) { mutableStateOf(initialLibraryTab) }
     var showImportCourseDialog by remember { mutableStateOf(false) }
     var showImportGrammarBookDialog by remember { mutableStateOf(false) }
@@ -119,6 +127,14 @@ fun HomeScreen(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
+        // FIX O (1b): Learning-Streak Counter with 🔥 icon at the TOP of the Home Screen
+        item {
+            StreakBanner(
+                streak = studyStreak,
+                isStudiedToday = isStudiedToday
+            )
+        }
+
         // Welcome Banner (Main Course) OR Grammar Book Banner
         item {
             if (selectedLibraryTab == HomeLibraryTab.GRAMMAR_BOOK) {
@@ -324,11 +340,20 @@ fun HomeScreen(
 
                 // Render Grammar Book Lessons (Full Lessons in LessonSchema)
                 items(grammarBookLessons, key = { it.id }) { lesson ->
+                    val totalWordsInLesson = lesson.vocabulary.size
+                    val learnedInLesson = lesson.vocabulary.count {
+                        learnedWords.contains("${lesson.id}_${it.word}")
+                    }
+                    val progress = if (totalWordsInLesson > 0) learnedInLesson.toFloat() / totalWordsInLesson.toFloat() else 0f
+
                     Card(
                         modifier = Modifier
                             .fillMaxWidth()
                             .testTag("grammar_book_lesson_card_${lesson.id}")
-                            .clickable { onNavigateToGrammarBookLessonVocab(lesson.id) },
+                            .clickable {
+                                progressManager.recordStudyDay()
+                                onNavigateToGrammarBookLessonVocab(lesson.id)
+                            },
                         shape = RoundedCornerShape(22.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.5.dp)
@@ -376,16 +401,42 @@ fun HomeScreen(
                                     }
                                 }
 
-                                // Delete button for Grammar Book Lesson (FIX H (5))
-                                IconButton(
-                                    onClick = { lessonToDeleteFromGrammarBook = lesson },
-                                    modifier = Modifier.testTag("btn_delete_grammar_book_lesson_${lesson.id}")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.Default.Delete,
-                                        contentDescription = "حذف درس از کتاب گرامر",
-                                        tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
-                                    )
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    // Circular Progress Ring showing percentage of learned vocabulary
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .testTag("grammar_book_progress_ring_${lesson.id}"),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        CircularProgressIndicator(
+                                            progress = { progress },
+                                            modifier = Modifier.fillMaxSize(),
+                                            strokeWidth = 3.5.dp,
+                                            color = if (progress >= 1f) SuccessGreen else MaterialTheme.colorScheme.primary,
+                                            trackColor = MaterialTheme.colorScheme.surfaceVariant
+                                        )
+                                        Text(
+                                            text = "${(progress * 100).toInt()}٪",
+                                            fontSize = 11.sp,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (progress >= 1f) SuccessGreen else MaterialTheme.colorScheme.onSurface
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(4.dp))
+
+                                    // Delete button for Grammar Book Lesson (FIX H (5))
+                                    IconButton(
+                                        onClick = { lessonToDeleteFromGrammarBook = lesson },
+                                        modifier = Modifier.testTag("btn_delete_grammar_book_lesson_${lesson.id}")
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "حذف درس از کتاب گرامر",
+                                            tint = MaterialTheme.colorScheme.error.copy(alpha = 0.8f)
+                                        )
+                                    }
                                 }
                             }
 
@@ -678,7 +729,10 @@ fun HomeScreen(
                     modifier = Modifier
                         .fillMaxWidth()
                         .testTag("lesson_card_${lesson.id}")
-                        .clickable { onNavigateToLessonVocab(lesson.id) },
+                        .clickable {
+                            progressManager.recordStudyDay()
+                            onNavigateToLessonVocab(lesson.id)
+                        },
                     shape = RoundedCornerShape(22.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 2.5.dp)
@@ -693,19 +747,32 @@ fun HomeScreen(
                                 verticalAlignment = Alignment.CenterVertically,
                                 modifier = Modifier.weight(1f)
                             ) {
+                                // Circular Progress Ring with Percentage/Badge
                                 Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(if (isFromMuse) Color(0xFF6366F1).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer),
+                                    modifier = Modifier.size(54.dp),
                                     contentAlignment = Alignment.Center
                                 ) {
-                                    Text(
-                                        text = "${lesson.number}",
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 18.sp,
-                                        color = if (isFromMuse) Color(0xFF4338CA) else MaterialTheme.colorScheme.onPrimaryContainer
+                                    CircularProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.size(54.dp),
+                                        strokeWidth = 3.5.dp,
+                                        color = if (progress >= 1.0f) Color(0xFF10B981) else MaterialTheme.colorScheme.primary,
+                                        trackColor = MaterialTheme.colorScheme.surfaceVariant
                                     )
+                                    Box(
+                                        modifier = Modifier
+                                            .size(44.dp)
+                                            .clip(CircleShape)
+                                            .background(if (isFromMuse) Color(0xFF6366F1).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${lesson.number}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 17.sp,
+                                            color = if (isFromMuse) Color(0xFF4338CA) else MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
                                 }
 
                                 Spacer(modifier = Modifier.width(12.dp))
@@ -799,7 +866,10 @@ fun HomeScreen(
                             horizontalArrangement = Arrangement.spacedBy(10.dp)
                         ) {
                             FilledTonalButton(
-                                onClick = { onNavigateToLessonVocab(lesson.id) },
+                                onClick = {
+                                    progressManager.recordStudyDay()
+                                    onNavigateToLessonVocab(lesson.id)
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(46.dp),
@@ -809,7 +879,10 @@ fun HomeScreen(
                             }
 
                             OutlinedButton(
-                                onClick = { onNavigateToLessonPractice(lesson.id) },
+                                onClick = {
+                                    progressManager.recordStudyDay()
+                                    onNavigateToLessonPractice(lesson.id)
+                                },
                                 modifier = Modifier
                                     .weight(1f)
                                     .height(46.dp),
@@ -1066,6 +1139,66 @@ private fun GrammarBookBanner(
                         contentDescription = null,
                         tint = AccentGold,
                         modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+/**
+ * FIX O (1b): Learning-streak counter banner at the top of the home screen.
+ * Persists study days, calculating consecutive days ending today (or yesterday).
+ * Label in Dari: «زنجیرهٔ یادگیری: N روز 🔥»
+ */
+@Composable
+private fun StreakBanner(
+    streak: Int,
+    isStudiedToday: Boolean
+) {
+    val streakText = UserProgressManager.toPersianDigits(streak.toString())
+    Surface(
+        modifier = Modifier
+            .fillMaxWidth()
+            .testTag("learning_streak_banner"),
+        shape = RoundedCornerShape(18.dp),
+        color = if (streak > 0) Color(0xFFFFF7ED) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+        border = BorderStroke(
+            width = 1.dp,
+            color = if (streak > 0) Color(0xFFFDBA74) else Color.Transparent
+        )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(horizontal = 16.dp, vertical = 12.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(if (streak > 0) Color(0xFFFFEDD5) else MaterialTheme.colorScheme.surface),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Text(text = "🔥", fontSize = 22.sp)
+                }
+                Spacer(modifier = Modifier.width(12.dp))
+                Column {
+                    Text(
+                        text = "زنجیرهٔ یادگیری: $streakText روز 🔥",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = if (streak > 0) Color(0xFFC2410C) else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (isStudiedToday) "امروز با موفقیت تمرین کرده‌اید! عالی هستید 👏" else "امروز هنوز درسی باز نکرده‌اید؛ تمرین کنید تا زنجیره حفظ شود!",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (streak > 0) Color(0xFF9A3412) else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
             }

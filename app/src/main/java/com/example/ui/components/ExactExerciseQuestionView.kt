@@ -1,15 +1,23 @@
 package com.example.ui.components
 
+import androidx.compose.animation.Animatable
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.BorderStroke
+import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -35,20 +43,28 @@ import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.scale
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ExerciseItem
+import com.example.data.storage.UserProgressManager
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SuccessGreen
+import kotlinx.coroutines.launch
+import kotlin.math.roundToInt
 
 @Composable
 fun ExactExerciseQuestionView(
@@ -64,6 +80,14 @@ fun ExactExerciseQuestionView(
     // Exact interaction state: starts BLANK for each question
     var selectedOption by remember(exercise, questionNumber) { mutableStateOf<String?>(null) }
     val isAnswered = selectedOption != null
+
+    val context = LocalContext.current
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    val coroutineScope = rememberCoroutineScope()
+    val shakeOffsetX = remember { Animatable(0f) }
+    val checkPopScale = remember { Animatable(0f) }
+    val flashAlphaAnim = remember { Animatable(0f) }
+    var flashColor by remember { mutableStateOf(Color.Transparent) }
 
     // Options (exactly 4)
     val options = remember(exercise) { exercise.options }
@@ -86,13 +110,23 @@ fun ExactExerciseQuestionView(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .offset { IntOffset(shakeOffsetX.value.roundToInt(), 0) }
                 .testTag("exact_exercise_card"),
             shape = RoundedCornerShape(24.dp),
             colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
             elevation = CardDefaults.cardElevation(defaultElevation = 2.5.dp),
             border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f))
         ) {
-            Column(modifier = Modifier.padding(14.dp)) {
+            Box(modifier = Modifier.fillMaxWidth()) {
+                if (flashAlphaAnim.value > 0f) {
+                    Box(
+                        modifier = Modifier
+                            .matchParentSize()
+                            .background(flashColor.copy(alpha = flashAlphaAnim.value))
+                    )
+                }
+
+                Column(modifier = Modifier.padding(14.dp)) {
                 // Header: question counter chip & audio buttons
                 Row(
                     modifier = Modifier
@@ -208,7 +242,32 @@ fun ExactExerciseQuestionView(
                                 .testTag("exercise_option_$index")
                                 .clickable(enabled = !isAnswered) {
                                     selectedOption = optionText
-                                    onAnswerSelected(optionText == exercise.correctAnswer)
+                                    val isCorrect = optionText == exercise.correctAnswer
+                                    progressManager.recordStudyDay()
+                                    onAnswerSelected(isCorrect)
+
+                                    if (isCorrect) {
+                                        coroutineScope.launch {
+                                            flashColor = Color(0xFF10B981)
+                                            flashAlphaAnim.snapTo(0.25f)
+                                            launch { flashAlphaAnim.animateTo(0f, tween(550)) }
+                                            checkPopScale.snapTo(0f)
+                                            checkPopScale.animateTo(
+                                                targetValue = 1f,
+                                                animationSpec = spring(dampingRatio = Spring.DampingRatioMediumBouncy, stiffness = Spring.StiffnessLow)
+                                            )
+                                        }
+                                    } else {
+                                        coroutineScope.launch {
+                                            flashColor = Color(0xFFEF4444)
+                                            flashAlphaAnim.snapTo(0.22f)
+                                            launch { flashAlphaAnim.animateTo(0f, tween(550)) }
+                                            shakeOffsetX.snapTo(0f)
+                                            for (dx in listOf(-14f, 14f, -10f, 10f, -5f, 5f, 0f)) {
+                                                shakeOffsetX.animateTo(dx, tween(35))
+                                            }
+                                        }
+                                    }
                                 },
                             shape = RoundedCornerShape(14.dp),
                             colors = CardDefaults.cardColors(containerColor = backgroundColor),
@@ -243,7 +302,9 @@ fun ExactExerciseQuestionView(
                                                 imageVector = Icons.Default.Check,
                                                 contentDescription = "درست",
                                                 tint = SuccessGreen,
-                                                modifier = Modifier.size(18.dp)
+                                                modifier = Modifier
+                                                    .size(19.dp)
+                                                    .scale(if (selectedOption == exercise.correctAnswer) checkPopScale.value.coerceAtLeast(0.7f) else 1f)
                                             )
                                         }
                                     } else if (isThisSelected) {
@@ -301,6 +362,7 @@ fun ExactExerciseQuestionView(
                 }
             }
         }
+    }
 
         // FIX B: Sticky/Prominent Action Bar ALWAYS VISIBLE when answered without scrolling
         AnimatedVisibility(visible = isAnswered) {
@@ -348,7 +410,14 @@ fun ExactExerciseQuestionView(
 
                     // FIX B: Small «تلاش دوباره» button that resets JUST the current question
                     OutlinedButton(
-                        onClick = { selectedOption = null },
+                        onClick = {
+                            selectedOption = null
+                            coroutineScope.launch {
+                                shakeOffsetX.snapTo(0f)
+                                checkPopScale.snapTo(0f)
+                                flashAlphaAnim.snapTo(0f)
+                            }
+                        },
                         modifier = Modifier
                             .height(48.dp)
                             .testTag("exercise_retry_question_button"),

@@ -14,6 +14,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
 import androidx.compose.material3.DropdownMenuItem
 import androidx.compose.material3.Icon
@@ -36,6 +37,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.storage.UserProgressManager
+import com.example.util.TtsManager
 
 /**
  * FIX F (1): Replace the fixed normal/۰.۶x button pair with:
@@ -58,6 +60,10 @@ fun AudioSpeechButtons(
     val appSpeed by progressManager.playbackSpeedFlow.collectAsState()
     val effectiveSpeed = speedOverride ?: appSpeed
 
+    val loadingSentence by TtsManager.activeLoadingSentenceFlow.collectAsState()
+    val cleanSentence = remember(textToSpeak) { TtsManager.cleanGermanText(textToSpeak) }
+    val isLoading = loadingSentence != null && loadingSentence == cleanSentence
+
     var expandedMenu by remember { mutableStateOf(false) }
 
     Row(
@@ -65,24 +71,33 @@ fun AudioSpeechButtons(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
-        // ONE Speaker button: plays at the currently chosen speed
+        // ONE Speaker button: plays at the currently chosen speed (shows spinner and disabled while loading)
         IconButton(
             onClick = {
                 // Calls onPlayAudio with text and whether the speed is slow (<= 0.75f)
                 onPlayAudio(textToSpeak, effectiveSpeed <= 0.75f)
             },
+            enabled = !isLoading,
             modifier = Modifier
                 .size(size.dp)
                 .clip(CircleShape)
                 .background(MaterialTheme.colorScheme.primaryContainer)
                 .testTag("audio_btn_speaker")
         ) {
-            Icon(
-                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
-                contentDescription = "شنیدن تلفظ با سرعت ${UserProgressManager.formatSpeedToPersian(effectiveSpeed)}",
-                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                modifier = Modifier.size((size * 0.54).dp)
-            )
+            if (isLoading) {
+                CircularProgressIndicator(
+                    modifier = Modifier.size((size * 0.52).dp),
+                    strokeWidth = 2.dp,
+                    color = MaterialTheme.colorScheme.primary
+                )
+            } else {
+                Icon(
+                    imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                    contentDescription = "شنیدن تلفظ با سرعت ${UserProgressManager.formatSpeedToPersian(effectiveSpeed)}",
+                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    modifier = Modifier.size((size * 0.54).dp)
+                )
+            }
         }
 
         // ONE Compact speed control showing current speed in Persian digits & opening dropdown

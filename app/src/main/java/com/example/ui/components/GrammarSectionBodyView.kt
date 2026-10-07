@@ -14,34 +14,48 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.VolumeUp
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.data.storage.UserProgressManager
+import com.example.util.TtsManager
 
 /**
- * FIX G: Beautiful, readable rendering of grammar sections.
+ * FIX G & FIX O: Beautiful, readable rendering of grammar sections.
  * Splits section body (bodyDari) into lines and renders with correct direction,
  * stacked table rows for "|" separators, subheadings, and comfortable typography.
+ * FIX O: Every German line gets its own speaker button in a fixed non-overlapping side column.
  */
 @Composable
 fun GrammarSectionCard(
     title: String,
     bodyDari: String,
     modifier: Modifier = Modifier,
-    sectionNumber: Int? = null
+    sectionNumber: Int? = null,
+    onPlayAudio: ((String, Boolean) -> Unit)? = null
 ) {
     Card(
         modifier = modifier.fillMaxWidth(),
@@ -89,7 +103,7 @@ fun GrammarSectionCard(
             Spacer(modifier = Modifier.height(12.dp))
 
             // Body rendering
-            GrammarSectionBodyView(bodyDari = bodyDari)
+            GrammarSectionBodyView(bodyDari = bodyDari, onPlayAudio = onPlayAudio)
         }
     }
 }
@@ -97,7 +111,8 @@ fun GrammarSectionCard(
 @Composable
 fun GrammarSectionBodyView(
     bodyDari: String,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onPlayAudio: ((String, Boolean) -> Unit)? = null
 ) {
     val rawLines = bodyDari.split("\n")
 
@@ -121,7 +136,7 @@ fun GrammarSectionBodyView(
 
             // RULE 2: Table Row containing "|" separator
             if (line.contains("|")) {
-                renderTableRowWithPipe(line)
+                renderTableRowWithPipe(line, onPlayAudio)
                 continue
             }
 
@@ -134,31 +149,46 @@ fun GrammarSectionBodyView(
             // Check if line is a German item with Dari translation in parentheses
             // e.g. "- Ich heiße... (من نامیده می‌شوم / نام من ... است)"
             if (isGermanItemWithDariParenthesis(line)) {
-                renderGermanWithDariParenthesis(line)
+                renderGermanWithDariParenthesis(line, onPlayAudio)
                 continue
             }
 
             // Bullet or list items
             if (line.startsWith("•") || line.startsWith("-") || line.startsWith("*") || line.startsWith("–")) {
-                renderListItem(line)
+                renderListItem(line, onPlayAudio)
                 continue
             }
 
             // Standard paragraph: check dominant script direction
             if (isMainlyLatin(line)) {
-                // German paragraph: LTR, left-aligned
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Text(
-                        text = line,
-                        fontSize = 14.5.sp,
-                        lineHeight = 24.sp,
-                        fontWeight = FontWeight.Medium,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Start,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(vertical = 2.dp)
-                    )
+                // German paragraph: LTR, left-aligned in a row with its fixed speaker column
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(vertical = 2.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = line,
+                            fontSize = 14.5.sp,
+                            lineHeight = 24.sp,
+                            fontWeight = FontWeight.Medium,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (onPlayAudio != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GrammarLineSpeakerButton(text = line, onPlayAudio = onPlayAudio)
+                        }
+                    }
                 }
             } else {
                 // Dari paragraph: RTL, right-aligned, comfortable line-height ~1.6
@@ -180,11 +210,57 @@ fun GrammarSectionBodyView(
 }
 
 /**
- * Renders a line with "|" separator as a neat STACKED group:
- * German segment first as LTR line, then Dari segment as RTL line.
+ * Fixed non-overlapping speaker button for a German grammar line.
+ * Automatically shows a loading spinner while Gemini audio is being fetched.
  */
 @Composable
-private fun renderTableRowWithPipe(line: String) {
+fun GrammarLineSpeakerButton(
+    text: String,
+    onPlayAudio: ((String, Boolean) -> Unit)?,
+    modifier: Modifier = Modifier
+) {
+    if (onPlayAudio == null) return
+    val context = LocalContext.current
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    val currentSpeed by progressManager.playbackSpeedFlow.collectAsState()
+    val loadingSentence by TtsManager.activeLoadingSentenceFlow.collectAsState()
+    val cleanText = remember(text) { TtsManager.cleanGermanText(text) }
+    val isLoading = loadingSentence != null && loadingSentence == cleanText
+
+    IconButton(
+        onClick = { onPlayAudio(cleanText, currentSpeed <= 0.75f) },
+        enabled = !isLoading,
+        modifier = modifier
+            .size(34.dp)
+            .clip(CircleShape)
+            .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.65f))
+    ) {
+        if (isLoading) {
+            CircularProgressIndicator(
+                modifier = Modifier.size(16.dp),
+                strokeWidth = 2.dp,
+                color = MaterialTheme.colorScheme.primary
+            )
+        } else {
+            Icon(
+                imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                contentDescription = "شنیدن تلفظ",
+                tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                modifier = Modifier.size(17.dp)
+            )
+        }
+    }
+}
+
+/**
+ * Renders a line with "|" separator as a neat STACKED group:
+ * German segment first as LTR line with dedicated speaker column, then Dari segment as RTL line.
+ */
+@Composable
+private fun renderTableRowWithPipe(
+    line: String,
+    onPlayAudio: ((String, Boolean) -> Unit)? = null
+) {
     val segments = line.split("|").map { it.trim() }.filter { it.isNotEmpty() }
     if (segments.isEmpty()) return
 
@@ -219,15 +295,30 @@ private fun renderTableRowWithPipe(line: String) {
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
             if (!germanText.isNullOrBlank()) {
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Text(
-                        text = germanText,
-                        fontWeight = FontWeight.Bold,
-                        fontSize = 15.sp,
-                        color = MaterialTheme.colorScheme.primary,
-                        textAlign = TextAlign.Start,
-                        modifier = Modifier.fillMaxWidth()
-                    )
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                        Text(
+                            text = germanText,
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 15.sp,
+                            color = MaterialTheme.colorScheme.primary,
+                            textAlign = TextAlign.Start,
+                            modifier = Modifier.weight(1f)
+                        )
+                    }
+                    if (onPlayAudio != null) {
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Box(
+                            modifier = Modifier.size(36.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            GrammarLineSpeakerButton(text = germanText, onPlayAudio = onPlayAudio)
+                        }
+                    }
                 }
             }
             if (!dariText.isNullOrBlank()) {
@@ -311,7 +402,7 @@ private fun renderSubheading(line: String) {
  * Detects patterns like "- Ich heiße... (من نامیده می‌شوم)" where German is outside
  * and Dari translation is in parentheses.
  */
-private fun isGermanItemWithDariParenthesis(line: String): Boolean {
+fun isGermanItemWithDariParenthesis(line: String): Boolean {
     val openParen = line.indexOf('(')
     val closeParen = line.lastIndexOf(')')
     if (openParen > 2 && closeParen > openParen) {
@@ -323,7 +414,10 @@ private fun isGermanItemWithDariParenthesis(line: String): Boolean {
 }
 
 @Composable
-private fun renderGermanWithDariParenthesis(line: String) {
+private fun renderGermanWithDariParenthesis(
+    line: String,
+    onPlayAudio: ((String, Boolean) -> Unit)? = null
+) {
     val openParen = line.indexOf('(')
     val closeParen = line.lastIndexOf(')')
     val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").trim()
@@ -340,15 +434,30 @@ private fun renderGermanWithDariParenthesis(line: String) {
             modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
             verticalArrangement = Arrangement.spacedBy(2.dp)
         ) {
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Text(
-                    text = beforeParen,
-                    fontWeight = FontWeight.Bold,
-                    fontSize = 14.5.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    textAlign = TextAlign.Start,
-                    modifier = Modifier.fillMaxWidth()
-                )
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Text(
+                        text = beforeParen,
+                        fontWeight = FontWeight.Bold,
+                        fontSize = 14.5.sp,
+                        color = MaterialTheme.colorScheme.primary,
+                        textAlign = TextAlign.Start,
+                        modifier = Modifier.weight(1f)
+                    )
+                }
+                if (onPlayAudio != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier.size(36.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        GrammarLineSpeakerButton(text = beforeParen, onPlayAudio = onPlayAudio)
+                    }
+                }
             }
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
                 Text(
@@ -366,7 +475,10 @@ private fun renderGermanWithDariParenthesis(line: String) {
 }
 
 @Composable
-private fun renderListItem(line: String) {
+private fun renderListItem(
+    line: String,
+    onPlayAudio: ((String, Boolean) -> Unit)? = null
+) {
     val content = line.removePrefix("•").removePrefix("-").removePrefix("*").removePrefix("–").trim()
     val isLatin = isMainlyLatin(content)
 
@@ -374,31 +486,46 @@ private fun renderListItem(line: String) {
         modifier = Modifier
             .fillMaxWidth()
             .padding(vertical = 3.dp),
-        verticalAlignment = Alignment.Top
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.SpaceBetween
     ) {
         if (isLatin) {
-            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                Row(verticalAlignment = Alignment.Top) {
-                    Text(
-                        text = "•",
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary,
-                        fontSize = 15.sp,
-                        modifier = Modifier.padding(end = 6.dp)
-                    )
-                    Text(
-                        text = content,
-                        fontWeight = FontWeight.Medium,
-                        fontSize = 14.sp,
-                        lineHeight = 23.sp,
-                        color = MaterialTheme.colorScheme.onSurface,
-                        textAlign = TextAlign.Start
-                    )
+            Row(
+                modifier = Modifier.weight(1f),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                    Row(verticalAlignment = Alignment.Top, modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "•",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 15.sp,
+                            modifier = Modifier.padding(end = 6.dp)
+                        )
+                        Text(
+                            text = content,
+                            fontWeight = FontWeight.Medium,
+                            fontSize = 14.sp,
+                            lineHeight = 23.sp,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            textAlign = TextAlign.Start
+                        )
+                    }
+                }
+                if (onPlayAudio != null) {
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Box(
+                        modifier = Modifier.size(36.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        GrammarLineSpeakerButton(text = content, onPlayAudio = onPlayAudio)
+                    }
                 }
             }
         } else {
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-                Row(verticalAlignment = Alignment.Top) {
+                Row(verticalAlignment = Alignment.Top, modifier = Modifier.fillMaxWidth()) {
                     Text(
                         text = "•",
                         fontWeight = FontWeight.Bold,

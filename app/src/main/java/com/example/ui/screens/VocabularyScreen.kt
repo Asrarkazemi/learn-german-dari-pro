@@ -1,6 +1,12 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.Arrangement
@@ -28,15 +34,19 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.automirrored.filled.ViewList
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FitnessCenter
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.QuestionAnswer
 import androidx.compose.material.icons.filled.School
 import androidx.compose.material.icons.filled.Shuffle
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material.icons.filled.Style
 import androidx.compose.material.icons.filled.ViewAgenda
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.FilterChip
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
@@ -44,36 +54,49 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ArticleType
 import com.example.data.model.LessonData
 import com.example.data.model.VocabularyItem
+import com.example.data.storage.UserProgressManager
 import com.example.ui.components.ArticleBadge
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.FlipFlashcard
 import com.example.ui.components.GrammarSectionCard
 import com.example.ui.theme.SuccessGreen
+import com.example.util.TtsManager
+import kotlin.math.roundToInt
+import kotlinx.coroutines.launch
 
 enum class VocabFilter {
     ALL,
@@ -102,6 +125,12 @@ fun VocabularyScreen(
     var selectedLessonId by remember(initialLessonId, allLessons) {
         val found = allLessons.find { it.id == initialLessonId }
         mutableStateOf(found?.id ?: allLessons.first().id)
+    }
+
+    val context = LocalContext.current
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    LaunchedEffect(selectedLessonId) {
+        progressManager.recordStudyDay()
     }
 
     // 4 sections: 0: «فلشکارتها», 1: «متن کامل درس», 2: «پرسش و پاسخ», 3: «تمرینها»
@@ -238,7 +267,8 @@ fun VocabularyScreen(
                 )
                 1 -> FullReadingSection(
                     currentLesson = currentLesson,
-                    onPlayAudio = onPlayAudio
+                    onPlayAudio = onPlayAudio,
+                    ttsManager = ttsManager
                 )
                 2 -> QaPairsSection(
                     currentLesson = currentLesson,
@@ -448,6 +478,13 @@ private fun FlashcardsSection(
                 val isLearned = learnedWords.contains(wordKey)
                 val example = currentLesson.exampleSentences.getOrNull(safeIndex % currentLesson.exampleSentences.size.coerceAtLeast(1))
 
+                val coroutineScope = rememberCoroutineScope()
+                val offsetX = remember { Animatable(0f) }
+
+                LaunchedEffect(safeIndex, currentWord) {
+                    offsetX.snapTo(0f)
+                }
+
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
@@ -489,16 +526,109 @@ private fun FlashcardsSection(
                         }
                     }
 
-                    FlipFlashcard(
-                        item = currentWord,
-                        example = example,
-                        isFlipped = isFlipped,
-                        onFlip = { isFlipped = !isFlipped },
-                        isLearned = isLearned,
-                        onMarkLearned = { learned -> onToggleLearned(wordKey, learned) },
-                        onPlayAudio = onPlayAudio,
-                        modifier = Modifier.padding(top = 4.dp)
+                    // FIX O (2): Dari hint text for swipeable flashcards
+                    Text(
+                        text = "👉 کشیدن به راست: یاد گرفتم ✓  |  👈 کشیدن به چپ: مرور شود ↺",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.85f),
+                        modifier = Modifier.padding(bottom = 6.dp)
                     )
+
+                    // FIX O (2): Swipeable Card Container with smooth animation & visual hint badges
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .offset { IntOffset(offsetX.value.roundToInt(), 0) }
+                            .graphicsLayer {
+                                rotationZ = (offsetX.value / 25f).coerceIn(-12f, 12f)
+                            }
+                            .pointerInput(safeIndex, currentWord) {
+                                detectHorizontalDragGestures(
+                                    onDragEnd = {
+                                        if (offsetX.value > 120f) {
+                                            // Swipe RIGHT -> Mark learned and move next
+                                            coroutineScope.launch {
+                                                offsetX.animateTo(600f, tween(180))
+                                                onToggleLearned(wordKey, true)
+                                                if (safeIndex < filteredWords.size - 1) {
+                                                    currentIndex = safeIndex + 1
+                                                }
+                                                isFlipped = false
+                                                offsetX.snapTo(0f)
+                                            }
+                                        } else if (offsetX.value < -120f) {
+                                            // Swipe LEFT -> Mark for review (not learned) and move next
+                                            coroutineScope.launch {
+                                                offsetX.animateTo(-600f, tween(180))
+                                                onToggleLearned(wordKey, false)
+                                                if (safeIndex < filteredWords.size - 1) {
+                                                    currentIndex = safeIndex + 1
+                                                }
+                                                isFlipped = false
+                                                offsetX.snapTo(0f)
+                                            }
+                                        } else {
+                                            // Snap back
+                                            coroutineScope.launch {
+                                                offsetX.animateTo(0f, spring(dampingRatio = Spring.DampingRatioMediumBouncy))
+                                            }
+                                        }
+                                    },
+                                    onHorizontalDrag = { change, dragAmount ->
+                                        change.consume()
+                                        coroutineScope.launch {
+                                            offsetX.snapTo(offsetX.value + dragAmount)
+                                        }
+                                    }
+                                )
+                            }
+                    ) {
+                        FlipFlashcard(
+                            item = currentWord,
+                            example = example,
+                            isFlipped = isFlipped,
+                            onFlip = { isFlipped = !isFlipped },
+                            isLearned = isLearned,
+                            onMarkLearned = { learned -> onToggleLearned(wordKey, learned) },
+                            onPlayAudio = onPlayAudio,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+
+                        // Visual swipe drag indicator overlays
+                        if (offsetX.value > 30f) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFF10B981).copy(alpha = (offsetX.value / 150f).coerceIn(0.2f, 0.9f)),
+                                modifier = Modifier
+                                    .align(Alignment.TopStart)
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "یاد گرفتم ✓",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        } else if (offsetX.value < -30f) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = Color(0xFFF59E0B).copy(alpha = (-offsetX.value / 150f).coerceIn(0.2f, 0.9f)),
+                                modifier = Modifier
+                                    .align(Alignment.TopEnd)
+                                    .padding(16.dp)
+                            ) {
+                                Text(
+                                    text = "مرور شود ↺",
+                                    color = Color.White,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 14.sp,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
 
                     Spacer(modifier = Modifier.height(16.dp))
 
@@ -566,8 +696,17 @@ private fun FlashcardsSection(
 @Composable
 private fun FullReadingSection(
     currentLesson: LessonData,
-    onPlayAudio: (String, Boolean) -> Unit
+    onPlayAudio: (String, Boolean) -> Unit,
+    ttsManager: com.example.util.TtsManager? = null
 ) {
+    val context = LocalContext.current
+    val progressManager = remember { UserProgressManager.getInstance(context) }
+    val effectiveTts = ttsManager ?: remember { com.example.util.TtsManager(context) }
+    val isSequentialPlaying by effectiveTts.isSequentialPlayingFlow.collectAsState()
+
+    var isStepByStepMode by remember(currentLesson.id) { mutableStateOf(false) }
+    var currentStepIndex by remember(currentLesson.id) { mutableIntStateOf(0) }
+
     val hasGrammar = currentLesson.grammarSections.isNotEmpty()
     val hasExamples = currentLesson.exampleSentences.isNotEmpty()
     val hasDialogues = currentLesson.dialogues.isNotEmpty()
@@ -595,35 +734,196 @@ private fun FullReadingSection(
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
-        // FIRST: Grammar Sections
-        if (hasGrammar) {
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(bottom = 4.dp)
+        // FIX O (4a & 3): Top Controls - Full-Text Audio & Step-by-Step Grammar Toggle
+        item {
+            Card(
+                modifier = Modifier.fillMaxWidth(),
+                shape = RoundedCornerShape(18.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
+                )
+            ) {
+                Column(
+                    modifier = Modifier.padding(12.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
                 ) {
-                    Icon(
-                        imageVector = Icons.Default.School,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.primary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "دستور زبان و نکات گرامری",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.primary
-                    )
+                    // (4a) Sequential Single-Line Playback through Existing Voice Pipeline
+                    FilledTonalButton(
+                        onClick = {
+                            if (isSequentialPlaying) {
+                                effectiveTts.stopSequentialPlayback()
+                            } else {
+                                val germanLines = TtsManager.extractAllGermanLinesForReading(
+                                    lesson = currentLesson,
+                                    stepByStepIndex = if (isStepByStepMode && hasGrammar) currentStepIndex else null
+                                )
+                                val speed = progressManager.getPlaybackSpeed()
+                                effectiveTts.startSequentialPlayback(germanLines, speed)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(48.dp)
+                            .testTag("btn_full_text_audio"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (isSequentialPlaying) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (isSequentialPlaying) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    ) {
+                        Icon(
+                            imageVector = if (isSequentialPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
+                            contentDescription = null,
+                            modifier = Modifier.size(20.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = if (isSequentialPlaying) "⏹ توقف پخش" else "▶ پخش صدای متن",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
+                        )
+                    }
+
+                    // (3) Step-by-Step Grammar Mode Toggle
+                    if (hasGrammar) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.surface,
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Row(
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Row(verticalAlignment = Alignment.CenterVertically) {
+                                    Icon(
+                                        imageVector = Icons.Default.School,
+                                        contentDescription = null,
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(20.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(8.dp))
+                                    Text(
+                                        text = "مرور قدم‌به‌قدم",
+                                        style = MaterialTheme.typography.bodyMedium,
+                                        fontWeight = FontWeight.Bold,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                }
+
+                                Switch(
+                                    checked = isStepByStepMode,
+                                    onCheckedChange = {
+                                        isStepByStepMode = it
+                                        currentStepIndex = 0
+                                    },
+                                    modifier = Modifier.scale(0.85f)
+                                )
+                            }
+                        }
+                    }
                 }
             }
+        }
 
-            itemsIndexed(currentLesson.grammarSections) { index, grammarSection ->
-                GrammarSectionCard(
-                    sectionNumber = index + 1,
-                    title = grammarSection.title,
-                    bodyDari = grammarSection.bodyDari
-                )
+        // FIRST: Grammar Sections (Step-by-step mode OR full list)
+        if (hasGrammar) {
+            if (isStepByStepMode) {
+                val safeStep = currentStepIndex.coerceIn(0, currentLesson.grammarSections.size - 1)
+                val currentSection = currentLesson.grammarSections[safeStep]
+
+                item {
+                    // Step-by-Step Navigation Bar
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        FilledIconButton(
+                            onClick = {
+                                if (currentStepIndex > 0) currentStepIndex--
+                            },
+                            enabled = currentStepIndex > 0,
+                            modifier = Modifier.size(46.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "قبلی"
+                            )
+                        }
+
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = MaterialTheme.colorScheme.primaryContainer
+                        ) {
+                            Text(
+                                text = "بخش ${safeStep + 1} از ${currentLesson.grammarSections.size}",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)
+                            )
+                        }
+
+                        FilledIconButton(
+                            onClick = {
+                                if (currentStepIndex < currentLesson.grammarSections.size - 1) currentStepIndex++
+                            },
+                            enabled = currentStepIndex < currentLesson.grammarSections.size - 1,
+                            modifier = Modifier.size(46.dp),
+                            shape = CircleShape
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = "بعدی"
+                            )
+                        }
+                    }
+                }
+
+                item {
+                    GrammarSectionCard(
+                        sectionNumber = safeStep + 1,
+                        title = currentSection.title,
+                        bodyDari = currentSection.bodyDari,
+                        onPlayAudio = onPlayAudio
+                    )
+                }
+            } else {
+                // Default full scrolling list
+                item {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(bottom = 4.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.School,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "دستور زبان و نکات گرامری",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                }
+
+                itemsIndexed(currentLesson.grammarSections) { index, grammarSection ->
+                    GrammarSectionCard(
+                        sectionNumber = index + 1,
+                        title = grammarSection.title,
+                        bodyDari = grammarSection.bodyDari,
+                        onPlayAudio = onPlayAudio
+                    )
+                }
             }
         }
 

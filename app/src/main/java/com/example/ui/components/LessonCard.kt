@@ -21,6 +21,7 @@ import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -79,18 +80,30 @@ fun LessonCard(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.weight(1f)
                 ) {
-                    // Emoji avatar badge
+                    // Emoji avatar badge with Circular Progress Ring
                     Box(
-                        modifier = Modifier
-                            .size(50.dp)
-                            .clip(CircleShape)
-                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        modifier = Modifier.size(54.dp),
                         contentAlignment = Alignment.Center
                     ) {
-                        Text(
-                            text = lesson.iconEmoji,
-                            fontSize = 24.sp
+                        CircularProgressIndicator(
+                            progress = { progress },
+                            modifier = Modifier.size(54.dp),
+                            strokeWidth = 3.5.dp,
+                            color = if (isCompleted) SuccessGreen else MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.surfaceVariant
                         )
+                        Box(
+                            modifier = Modifier
+                                .size(44.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primaryContainer),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = lesson.iconEmoji,
+                                fontSize = 22.sp
+                            )
+                        }
                     }
 
                     Spacer(modifier = Modifier.width(14.dp))

@@ -63,6 +63,11 @@ fun PracticeScreen(
     }
 
     var selectedTab by remember { mutableIntStateOf(0) } // 0: تمرین دروس, 1: صرف افعال
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
+    androidx.compose.runtime.LaunchedEffect(Unit) {
+        progressManager.recordStudyDay()
+    }
 
     Column(
         modifier = modifier

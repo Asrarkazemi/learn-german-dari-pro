@@ -72,6 +72,7 @@ fun GrammarScreen(
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
+    val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
     var showImportDialog by remember { mutableStateOf(false) }
     var selectedTopicId by remember { mutableStateOf<String?>(null) }
     var topicToDelete by remember { mutableStateOf<GrammarTopic?>(null) }
@@ -205,7 +206,10 @@ fun GrammarScreen(
                 modifier = Modifier
                     .fillMaxWidth()
                     .testTag("grammar_topic_card_${topic.id}")
-                    .clickable { selectedTopicId = topic.id },
+                    .clickable {
+                        progressManager.recordStudyDay()
+                        selectedTopicId = topic.id
+                    },
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)

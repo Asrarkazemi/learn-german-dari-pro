@@ -811,4 +811,64 @@ class ExampleRobolectricTest {
         // Cleanup
         progressManager.setDailyGeminiRequestsForTesting(today, 0)
     }
+
+    @Test
+    fun `verify FIX O study day persistence and streak calculation`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
+
+        // 1. Empty study days -> streak 0
+        assertEquals(0, progressManager.calculateStreak(emptySet(), "2026-10-07"))
+
+        // 2. Studied today -> streak 1
+        val today = "2026-10-07"
+        assertEquals(1, progressManager.calculateStreak(setOf(today), today))
+
+        // 3. Studied yesterday only -> streak 1
+        assertEquals(1, progressManager.calculateStreak(setOf("2026-10-06"), today))
+
+        // 4. Studied 2 days ago but not yesterday or today -> streak 0
+        assertEquals(0, progressManager.calculateStreak(setOf("2026-10-05"), today))
+
+        // 5. 3 consecutive days ending today -> streak 3
+        val streak3Today = setOf("2026-10-07", "2026-10-06", "2026-10-05")
+        assertEquals(3, progressManager.calculateStreak(streak3Today, today))
+
+        // 6. 3 consecutive days ending yesterday -> streak 3
+        val streak3Yesterday = setOf("2026-10-06", "2026-10-05", "2026-10-04")
+        assertEquals(3, progressManager.calculateStreak(streak3Yesterday, today))
+
+        // 7. Broken streak: today, yesterday, missing, 4 days ago -> streak 2
+        val broken = setOf("2026-10-07", "2026-10-06", "2026-10-03")
+        assertEquals(2, progressManager.calculateStreak(broken, today))
+
+        // 8. Test live recordStudyDay
+        progressManager.recordStudyDay()
+        assertTrue(progressManager.isTodayStudied())
+        assertTrue(progressManager.getStudyStreak() >= 1)
+    }
+
+    @Test
+    fun `verify FIX O German line extraction from grammar sections`() {
+        val sampleBody = """
+            Das Verb sein ist unregelmäßig.
+            • Ich bin Student (من دانشجو هستم)
+            • Du bist mein Freund
+            ich bin | من هستم
+            du bist | تو هستی
+            نکته مهم در زبان آلمانی:
+            فعل در جمله جایگاه دوم را دارد.
+        """.trimIndent()
+
+        val extracted = com.example.util.TtsManager.extractGermanLinesFromSectionBody(sampleBody)
+        assertTrue(extracted.contains("Das Verb sein ist unregelmäßig."))
+        assertTrue(extracted.contains("Ich bin Student"))
+        assertTrue(extracted.contains("Du bist mein Freund"))
+        assertTrue(extracted.contains("ich bin"))
+        assertTrue(extracted.contains("du bist"))
+        // Dari-only lines should NOT be extracted
+        org.junit.Assert.assertFalse(extracted.contains("نکته مهم در زبان آلمانی:"))
+        org.junit.Assert.assertFalse(extracted.contains("فعل در جمله جایگاه دوم را دارد."))
+    }
 }
+

@@ -6,6 +6,7 @@ import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
 import android.speech.tts.TextToSpeech
+import android.speech.tts.UtteranceProgressListener
 import android.speech.tts.Voice
 import android.util.Base64
 import android.util.Log
@@ -13,13 +14,21 @@ import android.widget.Toast
 import com.example.data.model.GrammarTopic
 import com.example.data.model.LessonData
 import com.example.data.storage.UserProgressManager
+import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.withContext
 import okhttp3.MediaType.Companion.toMediaType
 import okhttp3.OkHttpClient
@@ -31,6 +40,7 @@ import java.io.File
 import java.security.MessageDigest
 import java.util.Locale
 import java.util.concurrent.TimeUnit
+import kotlin.coroutines.resume
 
 /**
  * FIX K & FIX L (with FIX N batch removal): Quota-aware Gemini TTS with:
@@ -73,6 +83,12 @@ class TtsManager(
     private val legacyCacheDir: File = File(applicationContext.cacheDir, "gemini_tts_cache").apply { mkdirs() }
 
     private var mediaPlayer: MediaPlayer? = null
+
+    val activeLoadingSentenceFlow: StateFlow<String?> = Companion.activeLoadingSentenceFlow
+
+    private var sequentialJob: Job? = null
+    private val _isSequentialPlayingFlow = MutableStateFlow(false)
+    val isSequentialPlayingFlow: StateFlow<Boolean> = _isSequentialPlayingFlow.asStateFlow()
 
     init {
         tts = createTts()
@@ -253,10 +269,15 @@ class TtsManager(
                 if (played) return@launch
             }
 
-            if (apiKey.isNotEmpty()) {
-                val success = playGeminiTts(speechText, speed, apiKey)
-                if (!success) {
-                    speakWithDeviceTts(speechText, speed)
+            if (apiKey.isNotEmpty() && !areAllTtsModelsInCooldown()) {
+                _activeLoadingSentenceFlow.value = cleanGerman
+                try {
+                    val success = playGeminiTts(speechText, speed, apiKey)
+                    if (!success) {
+                        speakWithDeviceTts(speechText, speed)
+                    }
+                } finally {
+                    _activeLoadingSentenceFlow.value = null
                 }
             } else {
                 speakWithDeviceTts(speechText, speed)
@@ -390,6 +411,78 @@ class TtsManager(
     }
 
     /**
+     * Synthesizes Gemini TTS audio to the voice library file.
+     * Checks library/cache first; if not found, queries Gemini models with fallback and cooldown tracking.
+     */
+    suspend fun synthesizeGeminiAudioToLibrary(text: String, apiKey: String): File? {
+        val storedAudio = findStoredAudioFile(text, 1.0f)
+        if (storedAudio != null) return storedAudio
+
+        if (areAllTtsModelsInCooldown()) {
+            Log.d("TtsManager", "All TTS models are in quota cooldown and phrase not in library.")
+            return null
+        }
+
+        val promptText = buildNeutralPrompt(text)
+        val requestJson = buildTtsRequestBody(promptText)
+        val requestBodyStr = requestJson.toString()
+
+        for (model in TTS_MODELS) {
+            if (isModelInCooldown(model)) {
+                Log.d("TtsManager", "Model $model is in quota cooldown, skipping.")
+                continue
+            }
+
+            try {
+                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
+                val requestBody = requestBodyStr.toRequestBody("application/json; charset=utf-8".toMediaType())
+                val request = Request.Builder()
+                    .url(url)
+                    .post(requestBody)
+                    .build()
+
+                UserProgressManager.getInstance(applicationContext).incrementDailyGeminiRequestsCount()
+                val response = httpClient.newCall(request).execute()
+                val responseCode = response.code
+                val responseBodyStr = response.body?.string().orEmpty()
+
+                if (response.isSuccessful) {
+                    val audioBase64 = extractAudioBase64(responseBodyStr)
+                    if (!audioBase64.isNullOrBlank()) {
+                        val rawAudioBytes = Base64.decode(audioBase64, Base64.DEFAULT)
+                        if (rawAudioBytes.isNotEmpty()) {
+                            val wavBytes = ensureWavBytes(rawAudioBytes)
+
+                            // Save to permanent internal voice library
+                            val canonicalKey = getVoiceLibraryKey(text)
+                            val libraryFile = File(voiceLibraryDir, "$canonicalKey.wav")
+                            libraryFile.outputStream().use { it.write(wavBytes) }
+                            Log.d("TtsManager", "Saved audio to permanent internal voice library: ${libraryFile.name} (${libraryFile.length()} bytes)")
+                            return libraryFile
+                        }
+                    }
+                }
+
+                if (isQuotaError(responseCode, responseBodyStr)) {
+                    val cooldownMs = parseCooldownDurationMs(responseBodyStr, response.header("Retry-After"))
+                    setCooldown(model, System.currentTimeMillis() + cooldownMs)
+                    Log.w("TtsManager", "Quota exceeded for $model. Cooldown set for ${cooldownMs / 1000}s.")
+                    continue
+                }
+
+                if (isKeyError(responseCode, responseBodyStr)) {
+                    Log.w("TtsManager", "API key error for $model: $responseCode")
+                    return null
+                }
+
+            } catch (e: Exception) {
+                Log.w("TtsManager", "Error attempting Gemini TTS with $model: ${e.message}")
+            }
+        }
+        return null
+    }
+
+    /**
      * Plays Gemini TTS audio.
      * CRITICAL: Voice library / cache is ALWAYS checked first. Cached audio replays forever
      * without any network call or quota consumption.
@@ -404,73 +497,13 @@ class TtsManager(
                     return@withContext playAudioFile(storedAudio, speed)
                 }
 
-                // 2) Cooldown check before network call
-                if (areAllTtsModelsInCooldown()) {
-                    Log.d("TtsManager", "All TTS models are in quota cooldown and phrase not in library; falling back to device TTS.")
-                    return@withContext false
+                // 2) Synthesize or retrieve from library
+                val libraryFile = synthesizeGeminiAudioToLibrary(text, apiKey)
+                if (libraryFile != null) {
+                    playAudioFile(libraryFile, speed)
+                } else {
+                    false
                 }
-
-                // 3) Synthesize once in natural/neutral style; playback speed applied locally on player
-                val promptText = buildNeutralPrompt(text)
-                val requestJson = buildTtsRequestBody(promptText)
-                val requestBodyStr = requestJson.toString()
-
-                for (model in TTS_MODELS) {
-                    if (isModelInCooldown(model)) {
-                        Log.d("TtsManager", "Model $model is in quota cooldown, skipping.")
-                        continue
-                    }
-
-                    try {
-                        val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-                        val requestBody = requestBodyStr.toRequestBody("application/json; charset=utf-8".toMediaType())
-                        val request = Request.Builder()
-                            .url(url)
-                            .post(requestBody)
-                            .build()
-
-                        UserProgressManager.getInstance(applicationContext).incrementDailyGeminiRequestsCount()
-                        val response = httpClient.newCall(request).execute()
-                        val responseCode = response.code
-                        val responseBodyStr = response.body?.string().orEmpty()
-
-                        if (response.isSuccessful) {
-                            val audioBase64 = extractAudioBase64(responseBodyStr)
-                            if (!audioBase64.isNullOrBlank()) {
-                                val rawAudioBytes = Base64.decode(audioBase64, Base64.DEFAULT)
-                                if (rawAudioBytes.isNotEmpty()) {
-                                    val wavBytes = ensureWavBytes(rawAudioBytes)
-
-                                    // Save to permanent internal voice library
-                                    val canonicalKey = getVoiceLibraryKey(text)
-                                    val libraryFile = File(voiceLibraryDir, "$canonicalKey.wav")
-                                    libraryFile.outputStream().use { it.write(wavBytes) }
-                                    Log.d("TtsManager", "Saved audio to permanent internal voice library: ${libraryFile.name} (${libraryFile.length()} bytes)")
-
-                                    return@withContext playAudioFile(libraryFile, speed)
-                                }
-                            }
-                        }
-
-                        if (isQuotaError(responseCode, responseBodyStr)) {
-                            val cooldownMs = parseCooldownDurationMs(responseBodyStr, response.header("Retry-After"))
-                            setCooldown(model, System.currentTimeMillis() + cooldownMs)
-                            Log.w("TtsManager", "Quota exceeded for $model. Cooldown set for ${cooldownMs / 1000}s.")
-                            continue
-                        }
-
-                        if (isKeyError(responseCode, responseBodyStr)) {
-                            Log.w("TtsManager", "API key error for $model: $responseCode")
-                            return@withContext false
-                        }
-
-                    } catch (e: Exception) {
-                        Log.w("TtsManager", "Error attempting Gemini TTS with $model: ${e.message}")
-                    }
-                }
-
-                // If both models are in cooldown or failed -> return false to trigger device fallback
-                false
             } catch (e: Exception) {
                 Log.w("TtsManager", "Gemini TTS failed silently: ${e.message}")
                 false
@@ -628,6 +661,140 @@ class TtsManager(
         }
     }
 
+    suspend fun playAudioFileAndWait(file: File, speed: Float = 1.0f): Boolean = withContext(Dispatchers.Main) {
+        suspendCancellableCoroutine { cont ->
+            try {
+                stopAudio()
+                val player = MediaPlayer()
+                player.setDataSource(file.absolutePath)
+                player.prepare()
+
+                try {
+                    val params = player.playbackParams
+                    params.speed = speed
+                    player.playbackParams = params
+                } catch (e: Exception) {
+                    Log.w("TtsManager", "Could not set MediaPlayer playback speed: ${e.message}")
+                }
+
+                player.setOnCompletionListener { mp ->
+                    try { mp.release() } catch (e: Exception) {}
+                    if (mediaPlayer === mp) mediaPlayer = null
+                    if (cont.isActive) cont.resume(true)
+                }
+                player.setOnErrorListener { mp, _, _ ->
+                    try { mp.release() } catch (e: Exception) {}
+                    if (mediaPlayer === mp) mediaPlayer = null
+                    if (cont.isActive) cont.resume(false)
+                    true
+                }
+                cont.invokeOnCancellation {
+                    try {
+                        player.stop()
+                        player.release()
+                    } catch (e: Exception) {}
+                    if (mediaPlayer === player) mediaPlayer = null
+                }
+                mediaPlayer = player
+                player.start()
+            } catch (e: Exception) {
+                Log.w("TtsManager", "MediaPlayer playback failed: ${e.message}")
+                if (cont.isActive) cont.resume(false)
+            }
+        }
+    }
+
+    suspend fun speakWithDeviceTtsAndWait(speechText: String, speed: Float): Boolean = withContext(Dispatchers.Main) {
+        val ttsInstance = tts ?: return@withContext false
+        if (!isInitialized || !isGermanSupported) return@withContext false
+        suspendCancellableCoroutine { cont ->
+            val utteranceId = "german_seq_${System.currentTimeMillis()}_${(0..999).random()}"
+            ttsInstance.setSpeechRate(speed)
+            ttsInstance.setPitch(1.0f)
+            val listener = object : UtteranceProgressListener() {
+                override fun onStart(utteranceId: String?) {}
+                override fun onDone(id: String?) {
+                    if (id == utteranceId && cont.isActive) cont.resume(true)
+                }
+                override fun onError(id: String?) {
+                    if (id == utteranceId && cont.isActive) cont.resume(false)
+                }
+            }
+            ttsInstance.setOnUtteranceProgressListener(listener)
+            cont.invokeOnCancellation {
+                try { ttsInstance.stop() } catch (e: Exception) {}
+            }
+            val params = Bundle().apply {
+                putFloat(TextToSpeech.Engine.KEY_PARAM_VOLUME, 1.0f)
+                putFloat("rate", speed)
+                putFloat("speechRate", speed)
+                putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
+            }
+            val result = ttsInstance.speak(speechText, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            if (result != TextToSpeech.SUCCESS) {
+                if (cont.isActive) cont.resume(false)
+            }
+        }
+    }
+
+    suspend fun speakAndWait(text: String, speed: Float = getEffectiveSpeed()): Boolean = withContext(Dispatchers.IO) {
+        if (text.isBlank()) return@withContext false
+        val cleanGerman = cleanGermanText(text)
+        val speechText = if (cleanGerman.isNotEmpty()) cleanGerman else text
+
+        val storedAudio = findStoredAudioFile(speechText, speed)
+        if (storedAudio != null) {
+            return@withContext playAudioFileAndWait(storedAudio, speed)
+        }
+
+        val apiKey = getEffectiveApiKey()
+        if (apiKey.isNotEmpty() && !areAllTtsModelsInCooldown()) {
+            _activeLoadingSentenceFlow.value = cleanGerman
+            try {
+                val libraryFile = synthesizeGeminiAudioToLibrary(speechText, apiKey)
+                if (libraryFile != null) {
+                    _activeLoadingSentenceFlow.value = null
+                    return@withContext playAudioFileAndWait(libraryFile, speed)
+                }
+            } catch (e: Exception) {
+                Log.w("TtsManager", "Gemini TTS speakAndWait failed: ${e.message}")
+            } finally {
+                _activeLoadingSentenceFlow.value = null
+            }
+        }
+
+        speakWithDeviceTtsAndWait(speechText, speed)
+    }
+
+    fun startSequentialPlayback(lines: List<String>, speed: Float = getEffectiveSpeed()) {
+        stopSequentialPlayback()
+        if (lines.isEmpty()) return
+        _isSequentialPlayingFlow.value = true
+        sequentialJob = coroutineScope.launch {
+            try {
+                for (line in lines) {
+                    if (!isActive) break
+                    val clean = cleanGermanText(line)
+                    if (clean.isBlank()) continue
+                    speakAndWait(clean, speed)
+                    delay(300)
+                }
+            } catch (e: CancellationException) {
+                // Cancelled
+            } finally {
+                _isSequentialPlayingFlow.value = false
+            }
+        }
+    }
+
+    fun stopSequentialPlayback() {
+        sequentialJob?.cancel()
+        sequentialJob = null
+        _isSequentialPlayingFlow.value = false
+        stopAudio()
+        tts?.stop()
+    }
+
     fun shutdown() {
         stop()
         tts?.shutdown()
@@ -658,6 +825,9 @@ class TtsManager(
     }
 
     companion object {
+        private val _activeLoadingSentenceFlow = MutableStateFlow<String?>(null)
+        val activeLoadingSentenceFlow: StateFlow<String?> = _activeLoadingSentenceFlow.asStateFlow()
+
         const val PRIMARY_TTS_MODEL = "gemini-2.5-flash-tts"
         const val SECONDARY_TTS_MODEL = "gemini-2.5-flash-preview-tts"
 
@@ -791,6 +961,65 @@ class TtsManager(
                 if (cleanEx.isNotBlank()) result.add(cleanEx)
             }
             return result.distinct()
+        }
+
+        fun extractGermanLinesFromSectionBody(bodyDari: String): List<String> {
+            val results = mutableListOf<String>()
+            val rawLines = bodyDari.split("\n")
+            for (raw in rawLines) {
+                val line = raw.trim()
+                if (line.isEmpty()) continue
+                if (line.contains("|")) {
+                    val segments = line.split("|").map { it.trim() }.filter { it.isNotEmpty() }
+                    for (seg in segments) {
+                        if (com.example.ui.components.isMainlyLatin(seg)) {
+                            val clean = cleanGermanText(seg)
+                            if (clean.isNotBlank()) results.add(clean)
+                        }
+                    }
+                } else if (com.example.ui.components.isGermanItemWithDariParenthesis(line)) {
+                    val openParen = line.indexOf('(')
+                    val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").trim()
+                    val clean = cleanGermanText(beforeParen)
+                    if (clean.isNotBlank()) results.add(clean)
+                } else if (line.startsWith("•") || line.startsWith("-") || line.startsWith("*") || line.startsWith("–")) {
+                    val content = line.removePrefix("•").removePrefix("-").removePrefix("*").removePrefix("–").trim()
+                    if (com.example.ui.components.isMainlyLatin(content)) {
+                        val clean = cleanGermanText(content)
+                        if (clean.isNotBlank()) results.add(clean)
+                    }
+                } else if (com.example.ui.components.isMainlyLatin(line)) {
+                    val clean = cleanGermanText(line)
+                    if (clean.isNotBlank()) results.add(clean)
+                }
+            }
+            return results.distinct()
+        }
+
+        fun extractAllGermanLinesForReading(
+            lesson: LessonData,
+            stepByStepIndex: Int? = null
+        ): List<String> {
+            val results = mutableListOf<String>()
+            if (stepByStepIndex != null && stepByStepIndex in lesson.grammarSections.indices) {
+                val sec = lesson.grammarSections[stepByStepIndex]
+                results.addAll(extractGermanLinesFromSectionBody(sec.bodyDari))
+            } else {
+                for (sec in lesson.grammarSections) {
+                    results.addAll(extractGermanLinesFromSectionBody(sec.bodyDari))
+                }
+                for (ex in lesson.exampleSentences) {
+                    val clean = cleanGermanText(ex.german)
+                    if (clean.isNotBlank()) results.add(clean)
+                }
+                for (d in lesson.dialogues) {
+                    for (line in d.lines) {
+                        val clean = cleanGermanText(line.german)
+                        if (clean.isNotBlank()) results.add(clean)
+                    }
+                }
+            }
+            return results.distinct()
         }
 
         fun getVoiceLibraryDir(context: Context): File {

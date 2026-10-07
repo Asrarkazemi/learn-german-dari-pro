@@ -20,29 +20,37 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.ArrowForward
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.FormatQuote
 import androidx.compose.material.icons.filled.MenuBook
+import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.Refresh
+import androidx.compose.material.icons.filled.Stop
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilledIconButton
+import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -51,7 +59,9 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
@@ -80,6 +90,14 @@ fun GrammarTopicDetailScreen(
     var currentExerciseIndex by remember(topic.id) { mutableIntStateOf(0) }
     var exerciseScore by remember(topic.id) { mutableIntStateOf(0) }
     var isExerciseCompleted by remember(topic.id) { mutableStateOf(false) }
+
+    var isStepByStepMode by remember(topic.id) { mutableStateOf(false) }
+    var currentStepIndex by remember(topic.id) { mutableIntStateOf(0) }
+
+    val context = LocalContext.current
+    val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
+    val effectiveTts = ttsManager ?: remember { com.example.util.TtsManager(context) }
+    val isSequentialPlaying by effectiveTts.isSequentialPlayingFlow.collectAsState()
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
@@ -179,36 +197,172 @@ fun GrammarTopicDetailScreen(
                     }
                 }
 
-                // Section 1: Explanation Sections
+                // FIX O (4a): Sequential Audio playback for Grammar Topic
                 item {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(horizontal = 4.dp)
+                    FilledTonalButton(
+                        onClick = {
+                            if (isSequentialPlaying) {
+                                effectiveTts.stopSequentialPlayback()
+                            } else {
+                                val lines = mutableListOf<String>()
+                                if (isStepByStepMode && topic.sections.isNotEmpty()) {
+                                    val safeStep = currentStepIndex.coerceIn(0, topic.sections.size - 1)
+                                    lines.addAll(com.example.util.TtsManager.extractGermanLinesFromSectionBody(topic.sections[safeStep].bodyDari))
+                                } else {
+                                    for (sec in topic.sections) {
+                                        lines.addAll(com.example.util.TtsManager.extractGermanLinesFromSectionBody(sec.bodyDari))
+                                    }
+                                    for (ex in topic.exampleSentences) {
+                                        val clean = com.example.util.TtsManager.cleanGermanText(ex.german)
+                                        if (clean.isNotBlank()) lines.add(clean)
+                                    }
+                                }
+                                val speed = progressManager.getPlaybackSpeed()
+                                effectiveTts.startSequentialPlayback(lines, speed)
+                            }
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(46.dp)
+                            .testTag("btn_grammar_full_text_audio"),
+                        shape = RoundedCornerShape(14.dp),
+                        colors = ButtonDefaults.filledTonalButtonColors(
+                            containerColor = if (isSequentialPlaying) MaterialTheme.colorScheme.errorContainer else MaterialTheme.colorScheme.primaryContainer,
+                            contentColor = if (isSequentialPlaying) MaterialTheme.colorScheme.onErrorContainer else MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            imageVector = if (isSequentialPlaying) Icons.Default.Stop else Icons.Default.PlayArrow,
                             contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
                             modifier = Modifier.size(20.dp)
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text(
-                            text = "توضیحات و قواعد گرامر",
-                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                            color = MaterialTheme.colorScheme.onBackground
+                            text = if (isSequentialPlaying) "⏹ توقف پخش" else "▶ پخش صدای متن گرامر",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 14.sp
                         )
                     }
                 }
 
-                // Render all explanation sections
-                items(topic.sections.size, key = { "sec_$it" }) { index ->
-                    val section = topic.sections[index]
-                    GrammarSectionCard(
-                        sectionNumber = index + 1,
-                        title = section.title,
-                        bodyDari = section.bodyDari,
-                        modifier = Modifier.testTag("grammar_section_card_$index")
-                    )
+                // Section 1: Explanation Sections with Step-by-Step Toggle
+                item {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 4.dp),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(20.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "توضیحات و قواعد گرامر",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                color = MaterialTheme.colorScheme.onBackground
+                            )
+                        }
+
+                        if (topic.sections.size > 1) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                ) {
+                                    Text(
+                                        text = "مرور قدم‌به‌قدم",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isStepByStepMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Switch(
+                                        checked = isStepByStepMode,
+                                        onCheckedChange = {
+                                            isStepByStepMode = it
+                                            currentStepIndex = 0
+                                        },
+                                        modifier = Modifier.scale(0.8f)
+                                    )
+                                }
+                            }
+                        }
+                    }
+                }
+
+                if (isStepByStepMode && topic.sections.isNotEmpty()) {
+                    val safeStep = currentStepIndex.coerceIn(0, topic.sections.size - 1)
+                    val section = topic.sections[safeStep]
+
+                    item {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilledIconButton(
+                                onClick = { if (currentStepIndex > 0) currentStepIndex-- },
+                                enabled = currentStepIndex > 0,
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "قبلی")
+                            }
+
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = MaterialTheme.colorScheme.primaryContainer
+                            ) {
+                                Text(
+                                    text = "بخش ${safeStep + 1} از ${topic.sections.size}",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)
+                                )
+                            }
+
+                            FilledIconButton(
+                                onClick = { if (currentStepIndex < topic.sections.size - 1) currentStepIndex++ },
+                                enabled = currentStepIndex < topic.sections.size - 1,
+                                modifier = Modifier.size(44.dp),
+                                shape = CircleShape
+                            ) {
+                                Icon(Icons.AutoMirrored.Filled.ArrowForward, contentDescription = "بعدی")
+                            }
+                        }
+                    }
+
+                    item {
+                        GrammarSectionCard(
+                            sectionNumber = safeStep + 1,
+                            title = section.title,
+                            bodyDari = section.bodyDari,
+                            onPlayAudio = onPlayAudio,
+                            modifier = Modifier.testTag("grammar_section_card_$safeStep")
+                        )
+                    }
+                } else {
+                    // Render all explanation sections
+                    items(topic.sections.size, key = { "sec_$it" }) { index ->
+                        val section = topic.sections[index]
+                        GrammarSectionCard(
+                            sectionNumber = index + 1,
+                            title = section.title,
+                            bodyDari = section.bodyDari,
+                            onPlayAudio = onPlayAudio,
+                            modifier = Modifier.testTag("grammar_section_card_$index")
+                        )
+                    }
                 }
 
                 // Section 2: Example Sentences (Numbered, Line-by-Line with Audio)
