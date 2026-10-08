@@ -2,7 +2,10 @@ package com.example.ui.screens
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -61,6 +64,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.scale
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
@@ -73,6 +77,7 @@ import com.example.data.model.GrammarTopic
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.GrammarSectionCard
+import com.example.ui.components.RuntimeExercisesSection
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.SuccessGreen
 
@@ -93,6 +98,7 @@ fun GrammarTopicDetailScreen(
 
     var isStepByStepMode by remember(topic.id) { mutableStateOf(false) }
     var currentStepIndex by remember(topic.id) { mutableIntStateOf(0) }
+    var isUiVisible by remember { mutableStateOf(true) }
 
     val context = LocalContext.current
     val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
@@ -102,46 +108,60 @@ fun GrammarTopicDetailScreen(
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         Scaffold(
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = topic.titleDari,
-                                fontWeight = FontWeight.Bold,
-                                fontSize = 17.sp,
-                                maxLines = 1
-                            )
-                            Text(
-                                text = topic.titleGerman,
-                                fontSize = 12.sp,
-                                color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(
-                            onClick = onBack,
-                            modifier = Modifier.testTag("btn_back_grammar_detail")
-                        ) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                contentDescription = "بازگشت به فهرست گرامر"
-                            )
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer,
-                        titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                        navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                AnimatedVisibility(
+                    visible = isUiVisible,
+                    enter = slideInVertically(initialOffsetY = { -it }),
+                    exit = slideOutVertically(targetOffsetY = { -it })
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    text = topic.titleDari,
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 17.sp,
+                                    maxLines = 1
+                                )
+                                Text(
+                                    text = topic.titleGerman,
+                                    fontSize = 12.sp,
+                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
+                                )
+                            }
+                        },
+                        navigationIcon = {
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.testTag("btn_back_grammar_detail")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "بازگشت به فهرست گرامر"
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer,
+                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+                            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
                     )
-                )
+                }
             },
             modifier = modifier.fillMaxSize()
         ) { paddingValues ->
+            val effectivePadding = if (isUiVisible) paddingValues else PaddingValues(0.dp)
             LazyColumn(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
+                    .padding(effectivePadding)
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = {
+                                isUiVisible = !isUiVisible
+                            }
+                        )
+                    }
                     .testTag("grammar_detail_lazy_column"),
                 contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
                 verticalArrangement = Arrangement.spacedBy(18.dp)
@@ -348,6 +368,7 @@ fun GrammarTopicDetailScreen(
                             title = section.title,
                             bodyDari = section.bodyDari,
                             onPlayAudio = onPlayAudio,
+                            extraDistractorWords = emptyList(),
                             modifier = Modifier.testTag("grammar_section_card_$safeStep")
                         )
                     }
@@ -360,6 +381,7 @@ fun GrammarTopicDetailScreen(
                             title = section.title,
                             bodyDari = section.bodyDari,
                             onPlayAudio = onPlayAudio,
+                            extraDistractorWords = emptyList(),
                             modifier = Modifier.testTag("grammar_section_card_$index")
                         )
                     }
@@ -588,6 +610,16 @@ fun GrammarTopicDetailScreen(
                             }
                         }
                     }
+                }
+
+                // Section 4: Runtime generated exercises «تمرین‌های تازه» (Cloze, Word order, Matching)
+                item {
+                    Spacer(modifier = Modifier.height(8.dp))
+                    RuntimeExercisesSection(
+                        exampleSentences = topic.exampleSentences,
+                        vocabulary = emptyList(),
+                        onPlayAudio = onPlayAudio
+                    )
                 }
 
                 item {

@@ -919,8 +919,10 @@ class TtsManager(
         }
 
         fun cleanGermanText(text: String): String {
-            val clean = text.replace(Regex("[\\u0600-\\u06FF]"), "").trim()
-            return if (clean.isNotEmpty()) clean else text.trim()
+            // Feature 3: completed sentence with blanks replaced by their answers, never raw ⟦ ⟧ markup
+            val resolved = com.example.ui.components.resolveCompletedGermanText(text)
+            val clean = resolved.replace(Regex("[\\u0600-\\u06FF]"), "").trim()
+            return if (clean.isNotEmpty()) clean else resolved.trim()
         }
 
         fun collectGermanTextsFromLesson(lesson: LessonData): List<String> {

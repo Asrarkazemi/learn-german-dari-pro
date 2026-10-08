@@ -1,11 +1,15 @@
 package com.example.ui.screens
 
+import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.Animatable
 import androidx.compose.animation.core.Spring
 import androidx.compose.animation.core.spring
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.gestures.detectHorizontalDragGestures
+import androidx.compose.foundation.gestures.detectTapGestures
 import androidx.compose.foundation.layout.offset
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
@@ -93,6 +97,7 @@ import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.FlipFlashcard
 import com.example.ui.components.GrammarSectionCard
+import com.example.ui.components.RuntimeExercisesSection
 import com.example.ui.theme.SuccessGreen
 import com.example.util.TtsManager
 import kotlin.math.roundToInt
@@ -1408,6 +1413,14 @@ private fun LessonExercisesTab(
                 nextButtonText = if (safeIndex < exercises.size - 1) "سوال بعدی" else "مشاهده نتیجه",
                 modifier = Modifier.padding(top = 4.dp)
             )
+
+            // Feature 1: Three new runtime-generated exercise modes «تمرین‌های تازه»
+            Spacer(modifier = Modifier.height(20.dp))
+            RuntimeExercisesSection(
+                exampleSentences = currentLesson.exampleSentences,
+                vocabulary = currentLesson.vocabulary,
+                onPlayAudio = onPlayAudio
+            )
         } else {
             Card(
                 modifier = Modifier
@@ -1474,6 +1487,14 @@ private fun LessonExercisesTab(
                     }
                 }
             }
+
+            // Also offer «تمرین‌های تازه» even after finishing original exercises
+            Spacer(modifier = Modifier.height(16.dp))
+            RuntimeExercisesSection(
+                exampleSentences = currentLesson.exampleSentences,
+                vocabulary = currentLesson.vocabulary,
+                onPlayAudio = onPlayAudio
+            )
         }
     }
 }
