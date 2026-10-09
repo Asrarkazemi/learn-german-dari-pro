@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.test.core.app.ApplicationProvider
 import com.example.data.model.LessonData
 import com.example.data.repository.BuiltInCourseData
+import com.example.ui.consumeTaps
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
@@ -869,6 +870,37 @@ class ExampleRobolectricTest {
         // Dari-only lines should NOT be extracted
         org.junit.Assert.assertFalse(extracted.contains("نکته مهم در زبان آلمانی:"))
         org.junit.Assert.assertFalse(extracted.contains("فعل در جمله جایگاه دوم را دارد."))
+    }
+
+    @Test
+    fun `verify FIX R root immersive focus mode state and tap consumer`() {
+        var visible = true
+        val state = com.example.ui.ImmersiveUiState(
+            isUiVisible = visible,
+            toggleUiVisibility = { visible = !visible },
+            setUiVisible = { visible = it }
+        )
+
+        // 1. Initially UI chrome is visible
+        assertTrue(state.isUiVisible)
+
+        // 2. Toggling hides UI chrome (root TopAppBar, bottom navigation, tabs)
+        state.toggleUiVisibility()
+        org.junit.Assert.assertFalse(visible)
+
+        // 3. Toggling again restores UI chrome
+        state.toggleUiVisibility()
+        assertTrue(visible)
+
+        // 4. setUiVisible works explicitly
+        state.setUiVisible(false)
+        org.junit.Assert.assertFalse(visible)
+        state.setUiVisible(true)
+        assertTrue(visible)
+
+        // 5. Test consumeTaps modifier does not crash and chains on Modifier
+        val testModifier = androidx.compose.ui.Modifier.consumeTaps()
+        org.junit.Assert.assertNotNull(testModifier)
     }
 }
 

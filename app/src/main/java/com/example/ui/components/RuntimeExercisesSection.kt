@@ -69,6 +69,7 @@ import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.ui.consumeTaps
 import com.example.data.model.ExampleSentence
 import com.example.data.model.VocabularyItem
 import com.example.ui.theme.AccentGold
@@ -126,6 +127,7 @@ fun RuntimeExercisesSection(
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .consumeTaps()
             .testTag("runtime_exercises_container"),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(

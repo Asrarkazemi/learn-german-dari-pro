@@ -1,11 +1,15 @@
 package com.example.ui
 
 import androidx.activity.compose.BackHandler
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
@@ -129,82 +133,110 @@ fun MainScreen(
     var isNumbersScreenOpen by remember { mutableStateOf(false) }
     var showVoiceSettingsDialog by remember { mutableStateOf(false) }
 
+    var isUiVisible by remember { mutableStateOf(true) }
+    val immersiveUiState = remember(isUiVisible) {
+        ImmersiveUiState(
+            isUiVisible = isUiVisible,
+            toggleUiVisibility = { isUiVisible = !isUiVisible },
+            setUiVisible = { isUiVisible = it }
+        )
+    }
+
     val effectiveKey = progressManager.getEffectiveGeminiApiKey()
     val isTtsCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
     val isGeminiVoiceActive = effectiveKey.isNotEmpty() && !isTtsCooldownActive
 
     // Always RTL layout for Dari UI
-    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
+    CompositionLocalProvider(
+        LocalLayoutDirection provides LayoutDirection.Rtl,
+        LocalImmersiveUiState provides immersiveUiState
+    ) {
         if (isNumbersScreenOpen) {
-            BackHandler { isNumbersScreenOpen = false }
+            BackHandler {
+                isNumbersScreenOpen = false
+                isUiVisible = true
+            }
         } else if (currentTab != NavDestination.HOME) {
-            BackHandler { currentTab = NavDestination.HOME }
+            BackHandler {
+                currentTab = NavDestination.HOME
+                isUiVisible = true
+            }
         }
 
         Scaffold(
             modifier = modifier.fillMaxSize(),
             topBar = {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Text(
-                            text = if (isNumbersScreenOpen) "تمرین اعداد آلمانی" else "آلمانی بیاموز",
-                            fontWeight = FontWeight.Bold,
-                            fontSize = 19.sp,
-                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                AnimatedVisibility(
+                    visible = isUiVisible,
+                    enter = slideInVertically(initialOffsetY = { -it }),
+                    exit = slideOutVertically(targetOffsetY = { -it })
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Text(
+                                text = if (isNumbersScreenOpen) "تمرین اعداد آلمانی" else "آلمانی بیاموز",
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.sp,
+                                color = MaterialTheme.colorScheme.onPrimaryContainer
+                            )
+                        },
+                        navigationIcon = {
+                            // FIX A (2): Visible voice status in app header - clickable to open voice settings dialog
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = if (isGeminiVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
+                                modifier = Modifier
+                                    .padding(start = 12.dp)
+                                    .clip(RoundedCornerShape(12.dp))
+                                    .clickable { showVoiceSettingsDialog = true }
+                                    .testTag("top_bar_voice_status_chip")
+                            ) {
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.GraphicEq,
+                                        contentDescription = null,
+                                        tint = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(14.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(4.dp))
+                                    Text(
+                                        text = if (isGeminiVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
+                                        fontSize = 11.sp,
+                                        fontWeight = FontWeight.Bold,
+                                        color = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+                        },
+                        actions = {
+                            if (!isNumbersScreenOpen) {
+                                IconButton(
+                                    onClick = { isNumbersScreenOpen = true },
+                                    modifier = Modifier.testTag("top_bar_numbers_button")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Default.Calculate,
+                                        contentDescription = "اعداد ۰ تا ۱۰۰",
+                                        tint = MaterialTheme.colorScheme.onPrimaryContainer
+                                    )
+                                }
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer
                         )
-                    },
-                    navigationIcon = {
-                        // FIX A (2): Visible voice status in app header - clickable to open voice settings dialog
-                        Surface(
-                            shape = RoundedCornerShape(12.dp),
-                            color = if (isGeminiVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
-                            modifier = Modifier
-                                .padding(start = 12.dp)
-                                .clip(RoundedCornerShape(12.dp))
-                                .clickable { showVoiceSettingsDialog = true }
-                                .testTag("top_bar_voice_status_chip")
-                        ) {
-                            Row(
-                                verticalAlignment = Alignment.CenterVertically,
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.GraphicEq,
-                                    contentDescription = null,
-                                    tint = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant,
-                                    modifier = Modifier.size(14.dp)
-                                )
-                                Spacer(modifier = Modifier.width(4.dp))
-                                Text(
-                                    text = if (isGeminiVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
-                                    fontSize = 11.sp,
-                                    fontWeight = FontWeight.Bold,
-                                    color = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
-                                )
-                            }
-                        }
-                    },
-                    actions = {
-                        if (!isNumbersScreenOpen) {
-                            IconButton(
-                                onClick = { isNumbersScreenOpen = true },
-                                modifier = Modifier.testTag("top_bar_numbers_button")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Calculate,
-                                    contentDescription = "اعداد ۰ تا ۱۰۰",
-                                    tint = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.primaryContainer
                     )
-                )
+                }
             },
             bottomBar = {
-                if (!isNumbersScreenOpen) {
+                AnimatedVisibility(
+                    visible = isUiVisible && !isNumbersScreenOpen,
+                    enter = slideInVertically(initialOffsetY = { it }),
+                    exit = slideOutVertically(targetOffsetY = { it })
+                ) {
                     NavigationBar(
                         containerColor = MaterialTheme.colorScheme.surface,
                         tonalElevation = 8.dp
@@ -213,7 +245,10 @@ fun MainScreen(
                             val isSelected = currentTab == destination
                             NavigationBarItem(
                                 selected = isSelected,
-                                onClick = { currentTab = destination },
+                                onClick = {
+                                    currentTab = destination
+                                    isUiVisible = true
+                                },
                                 icon = {
                                     Icon(
                                         imageVector = if (isSelected) destination.selectedIcon else destination.unselectedIcon,
@@ -242,10 +277,11 @@ fun MainScreen(
                 }
             }
         ) { paddingValues ->
+            val effectivePadding = if (isUiVisible) paddingValues else PaddingValues(0.dp)
             Box(
                 modifier = Modifier
                     .fillMaxSize()
-                    .padding(paddingValues)
+                    .padding(effectivePadding)
             ) {
                 if (isNumbersScreenOpen) {
                     NumbersScreen(

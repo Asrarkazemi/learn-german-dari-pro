@@ -60,6 +60,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ExerciseItem
 import com.example.data.storage.UserProgressManager
+import com.example.ui.consumeTaps
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SuccessGreen
@@ -110,6 +111,7 @@ fun ExactExerciseQuestionView(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
+                .consumeTaps()
                 .offset { IntOffset(shakeOffsetX.value.roundToInt(), 0) }
                 .testTag("exact_exercise_card"),
             shape = RoundedCornerShape(24.dp),

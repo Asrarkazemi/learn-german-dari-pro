@@ -57,6 +57,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GrammarTopic
 import com.example.data.repository.GrammarBatchImportResult
+import com.example.ui.LocalImmersiveUiState
 import com.example.ui.components.ImportGrammarDialog
 import com.example.ui.theme.ErrorRed
 
@@ -69,20 +70,31 @@ fun GrammarScreen(
     onPlayAudio: (String, Boolean) -> Unit,
     onNavigateToLessons: (() -> Unit)? = null,
     ttsManager: com.example.util.TtsManager? = null,
+    selectedTopicId: String? = null,
+    onTopicSelected: ((String?) -> Unit)? = null,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
     val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
     var showImportDialog by remember { mutableStateOf(false) }
-    var selectedTopicId by remember { mutableStateOf<String?>(null) }
+    var localSelectedTopicId by remember { mutableStateOf<String?>(null) }
     var topicToDelete by remember { mutableStateOf<GrammarTopic?>(null) }
 
-    val selectedTopic = allTopics.firstOrNull { it.id == selectedTopicId }
+    val effectiveSelectedTopicId = selectedTopicId ?: localSelectedTopicId
+    val selectedTopic = allTopics.firstOrNull { it.id == effectiveSelectedTopicId }
+    val immersiveState = LocalImmersiveUiState.current
 
     if (selectedTopic != null) {
         GrammarTopicDetailScreen(
             topic = selectedTopic,
-            onBack = { selectedTopicId = null },
+            onBack = {
+                immersiveState.setUiVisible(true)
+                if (onTopicSelected != null) {
+                    onTopicSelected(null)
+                } else {
+                    localSelectedTopicId = null
+                }
+            },
             onPlayAudio = onPlayAudio,
             ttsManager = ttsManager
         )
@@ -208,7 +220,11 @@ fun GrammarScreen(
                     .testTag("grammar_topic_card_${topic.id}")
                     .clickable {
                         progressManager.recordStudyDay()
-                        selectedTopicId = topic.id
+                        if (onTopicSelected != null) {
+                            onTopicSelected(topic.id)
+                        } else {
+                            localSelectedTopicId = topic.id
+                        }
                     },
                 shape = RoundedCornerShape(20.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

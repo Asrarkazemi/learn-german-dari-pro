@@ -92,6 +92,8 @@ import com.example.data.model.ArticleType
 import com.example.data.model.LessonData
 import com.example.data.model.VocabularyItem
 import com.example.data.storage.UserProgressManager
+import com.example.ui.LocalImmersiveUiState
+import com.example.ui.consumeTaps
 import com.example.ui.components.ArticleBadge
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
@@ -146,115 +148,125 @@ fun VocabularyScreen(
     val currentLesson: LessonData = allLessons.find { it.id == selectedLessonId } ?: allLessons.first()
     val lessonIndex = allLessons.indexOf(currentLesson).coerceAtLeast(0)
 
+    val immersiveState = LocalImmersiveUiState.current
+
     Column(
         modifier = modifier
             .fillMaxSize()
             .testTag("vocabulary_screen")
     ) {
-        // Dynamic Lesson Selector Tabs
-        ScrollableTabRow(
-            selectedTabIndex = lessonIndex,
-            edgePadding = 12.dp,
-            modifier = Modifier.fillMaxWidth()
+        AnimatedVisibility(
+            visible = immersiveState.isUiVisible,
+            enter = slideInVertically(initialOffsetY = { -it }),
+            exit = slideOutVertically(targetOffsetY = { -it })
         ) {
-            allLessons.forEach { lesson ->
-                Tab(
-                    selected = selectedLessonId == lesson.id,
-                    onClick = {
-                        selectedLessonId = lesson.id
-                    },
-                    text = {
-                        Text(
-                            text = "درس ${lesson.number}",
-                            fontWeight = if (selectedLessonId == lesson.id) FontWeight.Bold else FontWeight.Normal
+            Column(modifier = Modifier.fillMaxWidth()) {
+                // Dynamic Lesson Selector Tabs
+                ScrollableTabRow(
+                    selectedTabIndex = lessonIndex,
+                    edgePadding = 12.dp,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    allLessons.forEach { lesson ->
+                        Tab(
+                            selected = selectedLessonId == lesson.id,
+                            onClick = {
+                                selectedLessonId = lesson.id
+                            },
+                            text = {
+                                Text(
+                                    text = "درس ${lesson.number}",
+                                    fontWeight = if (selectedLessonId == lesson.id) FontWeight.Bold else FontWeight.Normal
+                                )
+                            }
                         )
                     }
-                )
-            }
-        }
+                }
 
-        // Subheader: Lesson Title
-        Surface(
-            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Column(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .padding(horizontal = 16.dp, vertical = 8.dp)
-            ) {
-                Text(
-                    text = currentLesson.titleDari,
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.primary
-                )
-                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                    Text(
-                        text = currentLesson.titleGerman,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                // Subheader: Lesson Title
+                Surface(
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 16.dp, vertical = 8.dp)
+                    ) {
+                        Text(
+                            text = currentLesson.titleDari,
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                            Text(
+                                text = currentLesson.titleGerman,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+
+                // CHANGE 1: Restructure each lesson screen into 4 clear sections
+                // (a) «فلشکارتها»
+                // (b) «متن کامل درس»
+                // (c) «پرسش و پاسخ»
+                // (d) «تمرینها»
+                TabRow(
+                    selectedTabIndex = selectedSection,
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Tab(
+                        selected = selectedSection == 0,
+                        onClick = { selectedSection = 0 },
+                        text = {
+                            Text(
+                                text = "فلشکارتها",
+                                fontWeight = if (selectedSection == 0) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.testTag("tab_lesson_flashcards")
+                    )
+                    Tab(
+                        selected = selectedSection == 1,
+                        onClick = { selectedSection = 1 },
+                        text = {
+                            Text(
+                                text = "متن کامل درس",
+                                fontWeight = if (selectedSection == 1) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.testTag("tab_lesson_full_reading")
+                    )
+                    Tab(
+                        selected = selectedSection == 2,
+                        onClick = { selectedSection = 2 },
+                        text = {
+                            Text(
+                                text = "پرسش و پاسخ",
+                                fontWeight = if (selectedSection == 2) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.testTag("tab_lesson_qa")
+                    )
+                    Tab(
+                        selected = selectedSection == 3,
+                        onClick = { selectedSection = 3 },
+                        text = {
+                            Text(
+                                text = "تمرینها",
+                                fontWeight = if (selectedSection == 3) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.testTag("tab_lesson_exercises")
                     )
                 }
             }
-        }
-
-        // CHANGE 1: Restructure each lesson screen into 4 clear sections
-        // (a) «فلشکارتها»
-        // (b) «متن کامل درس»
-        // (c) «پرسش و پاسخ»
-        // (d) «تمرینها»
-        TabRow(
-            selectedTabIndex = selectedSection,
-            modifier = Modifier.fillMaxWidth()
-        ) {
-            Tab(
-                selected = selectedSection == 0,
-                onClick = { selectedSection = 0 },
-                text = {
-                    Text(
-                        text = "فلشکارتها",
-                        fontWeight = if (selectedSection == 0) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_lesson_flashcards")
-            )
-            Tab(
-                selected = selectedSection == 1,
-                onClick = { selectedSection = 1 },
-                text = {
-                    Text(
-                        text = "متن کامل درس",
-                        fontWeight = if (selectedSection == 1) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_lesson_full_reading")
-            )
-            Tab(
-                selected = selectedSection == 2,
-                onClick = { selectedSection = 2 },
-                text = {
-                    Text(
-                        text = "پرسش و پاسخ",
-                        fontWeight = if (selectedSection == 2) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_lesson_qa")
-            )
-            Tab(
-                selected = selectedSection == 3,
-                onClick = { selectedSection = 3 },
-                text = {
-                    Text(
-                        text = "تمرینها",
-                        fontWeight = if (selectedSection == 3) FontWeight.Bold else FontWeight.Normal,
-                        fontSize = 13.sp
-                    )
-                },
-                modifier = Modifier.testTag("tab_lesson_exercises")
-            )
         }
 
         // Content of the active section
@@ -301,6 +313,7 @@ private fun FlashcardsSection(
     var currentIndex by remember(currentLesson.id, activeFilter) { mutableIntStateOf(0) }
     var isFlipped by remember(currentLesson.id, currentIndex) { mutableStateOf(false) }
     var isListViewMode by remember { mutableStateOf(false) }
+    val immersiveState = LocalImmersiveUiState.current
 
     val filteredWords: List<VocabularyItem> = remember(lessonWords, activeFilter, learnedWords, currentLesson.id) {
         when (activeFilter) {
@@ -375,7 +388,15 @@ private fun FlashcardsSection(
         if (isListViewMode) {
             // List View
             LazyColumn(
-                modifier = Modifier.fillMaxSize(),
+                modifier = Modifier
+                    .fillMaxSize()
+                    .pointerInput(Unit) {
+                        detectTapGestures(
+                            onTap = {
+                                immersiveState.toggleUiVisibility()
+                            }
+                        )
+                    },
                 contentPadding = PaddingValues(14.dp),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
@@ -384,7 +405,9 @@ private fun FlashcardsSection(
                     val isLearned = learnedWords.contains(wordKey)
 
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .consumeTaps(),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -493,6 +516,13 @@ private fun FlashcardsSection(
                 Column(
                     modifier = Modifier
                         .fillMaxSize()
+                        .pointerInput(Unit) {
+                            detectTapGestures(
+                                onTap = {
+                                    immersiveState.toggleUiVisibility()
+                                }
+                            )
+                        }
                         .verticalScroll(rememberScrollState())
                         .padding(horizontal = 16.dp, vertical = 6.dp),
                     horizontalAlignment = Alignment.CenterHorizontally
@@ -732,9 +762,18 @@ private fun FullReadingSection(
         return
     }
 
+    val immersiveState = LocalImmersiveUiState.current
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        immersiveState.toggleUiVisibility()
+                    }
+                )
+            }
             .testTag("full_reading_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
@@ -742,7 +781,9 @@ private fun FullReadingSection(
         // FIX O (4a & 3): Top Controls - Full-Text Audio & Step-by-Step Grammar Toggle
         item {
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .consumeTaps(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -957,7 +998,9 @@ private fun FullReadingSection(
 
             itemsIndexed(currentLesson.exampleSentences) { index, sentence ->
                 Card(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .consumeTaps(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -1065,7 +1108,9 @@ private fun FullReadingSection(
             currentLesson.dialogues.forEach { dialogue ->
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .consumeTaps(),
                         shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -1178,9 +1223,18 @@ private fun QaPairsSection(
         return
     }
 
+    val immersiveState = LocalImmersiveUiState.current
+
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        immersiveState.toggleUiVisibility()
+                    }
+                )
+            }
             .testTag("qa_pairs_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
@@ -1208,7 +1262,9 @@ private fun QaPairsSection(
 
         itemsIndexed(currentLesson.qaPairs) { idx, qa ->
             Card(
-                modifier = Modifier.fillMaxWidth(),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .consumeTaps(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -1386,9 +1442,18 @@ private fun LessonExercisesTab(
 
     val safeIndex = currentExIndex.coerceIn(0, exercises.size - 1)
 
+    val immersiveState = LocalImmersiveUiState.current
+
     Column(
         modifier = Modifier
             .fillMaxSize()
+            .pointerInput(Unit) {
+                detectTapGestures(
+                    onTap = {
+                        immersiveState.toggleUiVisibility()
+                    }
+                )
+            }
             .verticalScroll(rememberScrollState())
             .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 48.dp),
         horizontalAlignment = Alignment.CenterHorizontally
@@ -1425,6 +1490,7 @@ private fun LessonExercisesTab(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
+                    .consumeTaps()
                     .padding(vertical = 24.dp),
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

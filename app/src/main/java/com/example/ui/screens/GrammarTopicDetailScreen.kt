@@ -74,6 +74,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GrammarTopic
+import com.example.ui.LocalImmersiveUiState
+import com.example.ui.consumeTaps
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.GrammarSectionCard
@@ -81,7 +83,6 @@ import com.example.ui.components.RuntimeExercisesSection
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.SuccessGreen
 
-@OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun GrammarTopicDetailScreen(
     topic: GrammarTopic,
@@ -98,7 +99,8 @@ fun GrammarTopicDetailScreen(
 
     var isStepByStepMode by remember(topic.id) { mutableStateOf(false) }
     var currentStepIndex by remember(topic.id) { mutableIntStateOf(0) }
-    var isUiVisible by remember { mutableStateOf(true) }
+
+    val immersiveState = LocalImmersiveUiState.current
 
     val context = LocalContext.current
     val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
@@ -106,70 +108,26 @@ fun GrammarTopicDetailScreen(
     val isSequentialPlaying by effectiveTts.isSequentialPlayingFlow.collectAsState()
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        Scaffold(
-            topBar = {
-                AnimatedVisibility(
-                    visible = isUiVisible,
-                    enter = slideInVertically(initialOffsetY = { -it }),
-                    exit = slideOutVertically(targetOffsetY = { -it })
-                ) {
-                    CenterAlignedTopAppBar(
-                        title = {
-                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                                Text(
-                                    text = topic.titleDari,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp,
-                                    maxLines = 1
-                                )
-                                Text(
-                                    text = topic.titleGerman,
-                                    fontSize = 12.sp,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.8f)
-                                )
-                            }
-                        },
-                        navigationIcon = {
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier.testTag("btn_back_grammar_detail")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "بازگشت به فهرست گرامر"
-                                )
-                            }
-                        },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer,
-                            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                            navigationIconContentColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
+        LazyColumn(
+            modifier = modifier
+                .fillMaxSize()
+                .pointerInput(Unit) {
+                    detectTapGestures(
+                        onTap = {
+                            immersiveState.toggleUiVisibility()
+                        }
                     )
                 }
-            },
-            modifier = modifier.fillMaxSize()
-        ) { paddingValues ->
-            val effectivePadding = if (isUiVisible) paddingValues else PaddingValues(0.dp)
-            LazyColumn(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .padding(effectivePadding)
-                    .pointerInput(Unit) {
-                        detectTapGestures(
-                            onTap = {
-                                isUiVisible = !isUiVisible
-                            }
-                        )
-                    }
-                    .testTag("grammar_detail_lazy_column"),
-                contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
-                verticalArrangement = Arrangement.spacedBy(18.dp)
-            ) {
+                .testTag("grammar_detail_lazy_column"),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
+            verticalArrangement = Arrangement.spacedBy(18.dp)
+        ) {
                 // Topic Overview Header Banner
                 item {
                     Card(
-                        modifier = Modifier.fillMaxWidth(),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .consumeTaps(),
                         shape = RoundedCornerShape(20.dp),
                         colors = CardDefaults.cardColors(
                             containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
@@ -196,7 +154,7 @@ fun GrammarTopicDetailScreen(
                                 )
                             }
                             Spacer(modifier = Modifier.width(14.dp))
-                            Column {
+                            Column(modifier = Modifier.weight(1f)) {
                                 Text(
                                     text = topic.titleDari,
                                     fontWeight = FontWeight.Bold,
@@ -212,6 +170,16 @@ fun GrammarTopicDetailScreen(
                                         fontWeight = FontWeight.SemiBold
                                     )
                                 }
+                            }
+                            IconButton(
+                                onClick = onBack,
+                                modifier = Modifier.testTag("btn_back_grammar_topic")
+                            ) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                    contentDescription = "بازگشت",
+                                    tint = MaterialTheme.colorScheme.primary
+                                )
                             }
                         }
                     }
@@ -415,6 +383,7 @@ fun GrammarTopicDetailScreen(
                         Card(
                             modifier = Modifier
                                 .fillMaxWidth()
+                                .consumeTaps()
                                 .testTag("grammar_sentence_card_$index"),
                             shape = RoundedCornerShape(16.dp),
                             colors = CardDefaults.cardColors(
@@ -561,6 +530,7 @@ fun GrammarTopicDetailScreen(
                             Card(
                                 modifier = Modifier
                                     .fillMaxWidth()
+                                    .consumeTaps()
                                     .testTag("grammar_exercise_completed_card"),
                                 shape = RoundedCornerShape(20.dp),
                                 colors = CardDefaults.cardColors(
@@ -628,4 +598,3 @@ fun GrammarTopicDetailScreen(
             }
         }
     }
-}
