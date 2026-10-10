@@ -1021,5 +1021,91 @@ class ExampleRobolectricTest {
 
         dummyMp3.delete()
     }
+
+    @Test
+    fun `verify Phase Q dialogue maker, saved dialogues repository, offline audio caching, and muse removal`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val repo = com.example.data.repository.SavedDialoguesRepository.getInstance(context)
+        val ttsManager = com.example.util.TtsManager(context)
+
+        // 1. Verify Muse tab is absent and new tabs exist in NavDestination
+        val navTags = com.example.ui.NavDestination.values().map { it.testTag }
+        org.junit.Assert.assertFalse("MUSE must be removed", navTags.contains("nav_item_muse"))
+        assertTrue("DIALOGUE_MAKER must be present", navTags.contains("nav_item_dialogue_maker"))
+        assertTrue("SAVED_DIALOGUES must be present", navTags.contains("nav_item_saved_dialogues"))
+
+        // 2. Data model: DialogueMakerLine serialization & deserialization
+        val sampleLine1 = com.example.data.model.DialogueMakerLine(
+            speaker = "A",
+            isSpeakerA = true,
+            german = "Hallo! Wie geht es dir?",
+            pronunciation = "هالو! وی گیت اِس دیر؟",
+            translationDari = "سلام! چطور هستی؟"
+        )
+        val sampleLine2 = com.example.data.model.DialogueMakerLine(
+            speaker = "B",
+            isSpeakerA = false,
+            german = "Mir geht es gut, danke!",
+            pronunciation = "میر گیت اِس گوت، دانکه!",
+            translationDari = "من خوب هستم، تشکر!"
+        )
+
+        val jsonLine1 = sampleLine1.toJsonObject()
+        val parsedLine1 = com.example.data.model.DialogueMakerLine.fromJsonObject(jsonLine1)
+        assertEquals("Hallo! Wie geht es dir?", parsedLine1.german)
+        assertTrue(parsedLine1.isSpeakerA)
+        assertEquals("سلام! چطور هستی؟", parsedLine1.translationDari)
+
+        // 3. SavedDialogue model & repository save/load/delete
+        val dialogueId = "test_dialogue_q_1"
+        val savedDialogue = com.example.data.model.SavedDialogue(
+            id = dialogueId,
+            topic = "در رستوران",
+            createdAtFormatted = "2026/10/10 - 10:00",
+            lines = listOf(sampleLine1, sampleLine2)
+        )
+
+        // Dummy audio files simulating generated audio for the dialogue
+        val tempAudio0 = java.io.File.createTempFile("line_0_test", ".mp3", context.cacheDir).apply {
+            writeBytes(ByteArray(512) { 1 })
+        }
+        val tempAudio1 = java.io.File.createTempFile("line_1_test", ".wav", context.cacheDir).apply {
+            writeBytes(ByteArray(1024) { 2 })
+        }
+
+        kotlinx.coroutines.runBlocking {
+            // Save dialogue with line audio files
+            val saveResult = repo.saveDialogue(savedDialogue, mapOf(0 to tempAudio0, 1 to tempAudio1))
+            assertTrue(saveResult.isSuccess)
+
+            // Verify dialogue exists in repo
+            val allSaved = repo.dialoguesFlow.value
+            val found = allSaved.firstOrNull { it.id == dialogueId }
+            assertNotNull(found)
+            assertEquals("در رستوران", found?.topic)
+            assertEquals(2, found?.lines?.size)
+
+            // Verify audio files are stored in files/saved_dialogues/<id>/
+            val audio0 = repo.findAudioForLine(dialogueId, 0)
+            assertNotNull("Offline audio for line 0 must exist", audio0)
+            assertEquals(512L, audio0?.length())
+
+            val audio1 = repo.findAudioForLine(dialogueId, 1)
+            assertNotNull("Offline audio for line 1 must exist", audio1)
+            assertEquals(1024L, audio1?.length())
+
+            // Line 2 has no audio
+            org.junit.Assert.assertNull(repo.findAudioForLine(dialogueId, 2))
+
+            // Delete dialogue
+            val deleted = repo.deleteDialogue(dialogueId)
+            assertTrue(deleted)
+            org.junit.Assert.assertNull(repo.dialoguesFlow.value.firstOrNull { it.id == dialogueId })
+            org.junit.Assert.assertNull(repo.findAudioForLine(dialogueId, 0))
+        }
+
+        tempAudio0.delete()
+        tempAudio1.delete()
+    }
 }
 

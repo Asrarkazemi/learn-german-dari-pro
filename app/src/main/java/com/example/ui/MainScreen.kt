@@ -31,12 +31,14 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.GraphicEq
 import androidx.compose.material.icons.filled.Home
 import androidx.compose.material.icons.filled.Psychology
+import androidx.compose.material.icons.filled.RecordVoiceOver
 import androidx.compose.material.icons.filled.SmartToy
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Book
 import androidx.compose.material.icons.outlined.FitnessCenter
 import androidx.compose.material.icons.outlined.Home
 import androidx.compose.material.icons.outlined.Psychology
+import androidx.compose.material.icons.outlined.RecordVoiceOver
 import androidx.compose.material.icons.outlined.SmartToy
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -75,14 +77,15 @@ import com.example.data.repository.GrammarRepository
 import com.example.data.repository.UnifiedCourseRepository
 import com.example.data.storage.UserProgressManager
 import com.example.ui.components.VoiceSettingsDialog
+import com.example.ui.screens.DialogueMakerScreen
 import com.example.ui.screens.DialoguesScreen
 import com.example.ui.screens.GeminiChatScreen
 import com.example.ui.screens.GrammarScreen
 import com.example.ui.screens.HomeScreen
-import com.example.ui.screens.MuseScreen
 import com.example.ui.screens.NumbersScreen
 import com.example.ui.screens.PracticeScreen
 import com.example.ui.screens.QuizScreen
+import com.example.ui.screens.SavedDialoguesLibraryScreen
 import com.example.ui.screens.VocabularyScreen
 import com.example.ui.theme.AccentGold
 import com.example.ui.theme.IndigoPrimary
@@ -100,8 +103,9 @@ enum class NavDestination(
     PRACTICE("تمرین", Icons.Filled.FitnessCenter, Icons.Outlined.FitnessCenter, "nav_item_practice"),
     QUIZ("آزمون", Icons.Filled.Psychology, Icons.Outlined.Psychology, "nav_item_quiz"),
     DIALOGUES("گفتگو", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat, "nav_item_dialogues"),
-    GEMINI_CHAT("چت جیمنای", Icons.Filled.SmartToy, Icons.Outlined.SmartToy, "nav_item_gemini_chat"),
-    MUSE("موس", Icons.Filled.AutoAwesome, Icons.Outlined.AutoAwesome, "nav_item_muse")
+    DIALOGUE_MAKER("مکالمه‌ساز", Icons.Filled.RecordVoiceOver, Icons.Outlined.RecordVoiceOver, "nav_item_dialogue_maker"),
+    SAVED_DIALOGUES("کتابخانه مکالمات", Icons.AutoMirrored.Filled.Chat, Icons.AutoMirrored.Outlined.Chat, "nav_item_saved_dialogues"),
+    GEMINI_CHAT("چت جیمنای", Icons.Filled.SmartToy, Icons.Outlined.SmartToy, "nav_item_gemini_chat")
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -327,7 +331,7 @@ fun MainScreen(
                                 },
                                 onNavigateToNumbers = { isNumbersScreenOpen = true },
                                 onNavigateToQuiz = { currentTab = NavDestination.QUIZ },
-                                onNavigateToMuse = { currentTab = NavDestination.MUSE },
+                                onNavigateToMuse = { currentTab = NavDestination.DIALOGUE_MAKER },
                                 onImportJson = { json -> courseRepository.importJson(json) },
                                 onImportGrammarBookJson = { json -> grammarBookRepository.importJson(json) },
                                 onDeleteCustomLesson = { lessonId -> courseRepository.deleteCustomLesson(lessonId) },
@@ -397,6 +401,18 @@ fun MainScreen(
                             )
                         }
 
+                        NavDestination.DIALOGUE_MAKER -> {
+                            DialogueMakerScreen(
+                                ttsManager = ttsManager
+                            )
+                        }
+
+                        NavDestination.SAVED_DIALOGUES -> {
+                            SavedDialoguesLibraryScreen(
+                                ttsManager = ttsManager
+                            )
+                        }
+
                         NavDestination.GEMINI_CHAT -> {
                             GeminiChatScreen(
                                 currentApiKey = effectiveKey,
@@ -405,12 +421,6 @@ fun MainScreen(
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
                                 onImportGrammarJson = { json -> grammarRepository.importTopic(json) },
                                 onTestVoice = { key, speed -> ttsManager.testGeminiVoice(speed = speed, keyOverride = key) }
-                            )
-                        }
-
-                        NavDestination.MUSE -> {
-                            MuseScreen(
-                                onImportJson = { json -> courseRepository.importJson(json) }
                             )
                         }
                     }

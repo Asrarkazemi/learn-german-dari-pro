@@ -356,5 +356,109 @@ class GeminiChatService {
             }
             return null
         }
+
+        fun extractDialogueJson(text: String): String? {
+            val jsonStart = text.indexOf("```json")
+            if (jsonStart != -1) {
+                val afterStart = text.substring(jsonStart + 7)
+                val jsonEnd = afterStart.indexOf("```")
+                if (jsonEnd != -1) {
+                    val potentialJson = afterStart.substring(0, jsonEnd).trim()
+                    if (potentialJson.contains("\"lines\"") || potentialJson.contains("\"german\"")) {
+                        return potentialJson
+                    }
+                }
+            }
+            // Also check for raw JSON without markdown
+            val trimmed = text.trim()
+            if ((trimmed.startsWith("{") && trimmed.endsWith("}")) ||
+                (trimmed.startsWith("[") && trimmed.endsWith("]"))) {
+                if (trimmed.contains("\"lines\"") || trimmed.contains("\"german\"")) {
+                    return trimmed
+                }
+            }
+            return null
+        }
+    }
+
+    /**
+     * Generates a 2-person A/B dialogue (~10-16 lines) on the specified topic.
+     * Uses existing Gemini integration, models fallback, and Dari error handling.
+     */
+    suspend fun generateDialogue(
+        topic: String,
+        apiKey: String,
+        onStatusUpdate: ((String) -> Unit)? = null
+    ): Result<List<com.example.data.model.DialogueMakerLine>> = withContext(Dispatchers.IO) {
+        val cleanKey = apiKey.trim()
+        if (cleanKey.isEmpty()) {
+            return@withContext Result.failure(
+                GeminiChatException.KeyErrorException("کلید API جیمنای تنظیم نشده است. لطفاً ابتدا کلید خود را از بخش تنظیمات وارد نمایید.")
+            )
+        }
+
+        val prompt = """
+            یک مکالمه طبیعی دونفره (شخص A و شخص B) به زبان آلمانی دربارهٔ موضوع زیر بسازید:
+            موضوع: $topic
+
+            الزامات مهم:
+            ۱. تعداد خطوط: بین ۱۰ تا ۱۶ خط متناوب (یک بار شخص A و بار بعد شخص B).
+            ۲. سطح: مناسب زبان‌آموز سطح A1 تا A2، جملات کاربردی، روان و طبیعی روزمره.
+            ۳. برای هر خط:
+               - speaker: "A" برای شخص اول (مرد) و "B" برای شخص دوم (زن).
+               - german: متن جمله به زبان آلمانی استاندارد.
+               - pronunciation: تلفظ کامل جمله به خط فارسی دری.
+               - translationDari: معنی دقیق و طبیعی به زبان فارسی دری.
+            ۴. خروجی را دقیقاً و فقط در یک بلوک کد ```json ارائه دهید با این ساختار:
+            ```json
+            {
+              "topic": "$topic",
+              "lines": [
+                {
+                  "speaker": "A",
+                  "isSpeakerA": true,
+                  "german": "Hallo! Wie geht es dir?",
+                  "pronunciation": "هالو! وی گیت اِس دیر؟",
+                  "translationDari": "سلام! چطور هستی؟"
+                },
+                {
+                  "speaker": "B",
+                  "isSpeakerA": false,
+                  "german": "Mir geht es gut, danke. Und dir?",
+                  "pronunciation": "میر گیت اِس گوت، دانکه. اونت دیر؟",
+                  "translationDari": "من خوب هستم، تشکر. و تو؟"
+                }
+              ]
+            }
+            ```
+            فقط بلوک کد JSON را ارسال کنید بدون توضیحات اضافی.
+        """.trimIndent()
+
+        val rawResult = sendMessage(
+            userMessage = prompt,
+            apiKey = cleanKey,
+            conversationHistory = emptyList(),
+            onStatusUpdate = onStatusUpdate
+        )
+
+        rawResult.mapCatching { responseText ->
+            val jsonStr = extractDialogueJson(responseText) ?: responseText
+            val jsonClean = jsonStr.replace("```json", "").replace("```", "").trim()
+            val linesList = mutableListOf<com.example.data.model.DialogueMakerLine>()
+
+            val rootObj = if (jsonClean.startsWith("{")) JSONObject(jsonClean) else JSONObject().put("lines", JSONArray(jsonClean))
+            val linesArr = rootObj.getJSONArray("lines")
+
+            for (i in 0 until linesArr.length()) {
+                val lineObj = linesArr.getJSONObject(i)
+                linesList.add(com.example.data.model.DialogueMakerLine.fromJsonObject(lineObj))
+            }
+
+            if (linesList.isEmpty()) {
+                throw GeminiChatException.GeneralException("مکالمه‌ای با خطوط معتبر از سرور دریافت نشد.")
+            }
+
+            linesList
+        }
     }
 }

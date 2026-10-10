@@ -495,6 +495,116 @@ class TtsManager(
     }
 
     /**
+     * Synthesizes a segment with a specific fixed voice (e.g. speaker A male Conrad/Charon,
+     * speaker B female Klara/Kore) checking cache first, trying chosen provider then other,
+     * saving to permanent voice library. Returns the audio File if synthesized or cached.
+     */
+    suspend fun synthesizeSegmentWithVoice(
+        text: String,
+        isPersian: Boolean,
+        speed: Float,
+        isMaleVoice: Boolean
+    ): File? {
+        val clean = text.trim()
+        if (clean.isBlank()) return null
+
+        val chosenProvider = getChosenVoiceProvider()
+        val azureVoice = if (isPersian) {
+            if (isMaleVoice) AZURE_VOICE_FA_FARID else AZURE_VOICE_FA_DILARA
+        } else {
+            if (isMaleVoice) AZURE_VOICE_CONRAD else AZURE_VOICE_KLARA
+        }
+        val geminiVoice = if (isMaleVoice) GEMINI_VOICE_CHARON else GEMINI_VOICE_KORE
+
+        // 1) First check stored audio in voice library
+        val storedFile = findStoredAudioFile(clean, speed, if (chosenProvider == PROVIDER_AZURE) azureVoice else geminiVoice, chosenProvider)
+            ?: findStoredAudioFile(clean, speed, azureVoice, PROVIDER_AZURE)
+            ?: findStoredAudioFile(clean, speed, geminiVoice, PROVIDER_GEMINI)
+        if (storedFile != null) {
+            return storedFile
+        }
+
+        val azureKey = getEffectiveAzureKey()
+        val geminiKey = getEffectiveApiKey()
+
+        // 2) Dual-provider execution order
+        if (chosenProvider == PROVIDER_AZURE) {
+            if (azureKey.isNotEmpty()) {
+                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey, voiceOverride = azureVoice)
+                if (file != null) return file
+            }
+            if (geminiKey.isNotEmpty()) {
+                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey, voiceOverride = geminiVoice)
+                if (file != null) return file
+            }
+        } else {
+            if (geminiKey.isNotEmpty()) {
+                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey, voiceOverride = geminiVoice)
+                if (file != null) return file
+            }
+            if (azureKey.isNotEmpty()) {
+                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey, voiceOverride = azureVoice)
+                if (file != null) return file
+            }
+        }
+
+        return null
+    }
+
+    /**
+     * Plays a dialogue line using fixed voice (Speaker A Conrad/male, Speaker B Klara/female)
+     * with German first then Dari translation, falling back to device TTS with Dari note if unconfigured.
+     */
+    suspend fun playDialogueLineAndWait(
+        germanText: String,
+        dariText: String?,
+        isSpeakerA: Boolean,
+        speed: Float = getEffectiveSpeed(),
+        existingAudioFile: File? = null
+    ): Boolean = withContext(Dispatchers.IO) {
+        val (german, dari) = parseGermanAndDari(germanText, dariText)
+        if (german.isBlank() && (dari == null || dari.isBlank())) return@withContext false
+
+        _activeLoadingSentenceFlow.value = german
+        try {
+            var playedOk = false
+
+            // 1. If explicit offline file exists, play it directly!
+            if (existingAudioFile != null && existingAudioFile.exists() && existingAudioFile.length() > 0) {
+                playedOk = playAudioFileAndWait(existingAudioFile, speed)
+            } else {
+                // Synthesize or retrieve from cache
+                val germanFile = synthesizeSegmentWithVoice(german, isPersian = false, speed = speed, isMaleVoice = isSpeakerA)
+                if (germanFile != null) {
+                    playedOk = playAudioFileAndWait(germanFile, speed)
+                } else {
+                    // Fallback to device TTS with Dari toast if no cloud voice is configured
+                    val hasAnyCloudKey = getEffectiveAzureKey().isNotEmpty() || getEffectiveApiKey().isNotEmpty()
+                    if (!hasAnyCloudKey) {
+                        showToast("کلید صوتی تنظیم نشده است؛ صدا از موتور گفتار گوشی پخش می‌شود.")
+                    }
+                    playedOk = speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
+                }
+            }
+
+            // Play Dari translation
+            if (!dari.isNullOrBlank() && currentCoroutineContext().isActive) {
+                delay(300)
+                val dariFile = synthesizeSegmentWithVoice(dari, isPersian = true, speed = speed, isMaleVoice = isSpeakerA)
+                if (dariFile != null) {
+                    playAudioFileAndWait(dariFile, speed)
+                } else {
+                    speakWithDeviceTtsAndWait(dari, isPersian = true, speed = speed)
+                }
+            }
+
+            playedOk
+        } finally {
+            _activeLoadingSentenceFlow.value = null
+        }
+    }
+
+    /**
      * Plays a single segment and waits for playback to finish.
      * Cloud synthesis -> Device TTS fallback.
      */

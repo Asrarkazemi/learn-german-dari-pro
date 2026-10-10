@@ -94,7 +94,7 @@ fun HomeScreen(
     onNavigateToGrammarBookLessonPractice: (String) -> Unit = {},
     onNavigateToNumbers: () -> Unit,
     onNavigateToQuiz: () -> Unit,
-    onNavigateToMuse: () -> Unit,
+    onNavigateToMuse: () -> Unit = {},
     onImportJson: (String) -> Result<BatchImportResult>,
     onImportGrammarBookJson: (String) -> Result<BatchImportResult> = { Result.failure(Exception("Not implemented")) },
     onDeleteCustomLesson: (String) -> Unit,
@@ -621,70 +621,6 @@ fun HomeScreen(
                         }
                     }
                 }
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                // Prominent Muse Assistant Banner
-                Card(
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("shortcut_muse_assistant")
-                        .clickable { onNavigateToMuse() },
-                    shape = RoundedCornerShape(18.dp),
-                    colors = CardDefaults.cardColors(
-                        containerColor = Color(0xFFEEF2FF)
-                    ),
-                    elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-                ) {
-                    Row(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .padding(14.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
-                    ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
-                        ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(42.dp)
-                                    .clip(CircleShape)
-                                    .background(Color(0xFF4338CA)),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.AutoAwesome,
-                                    contentDescription = null,
-                                    tint = Color.White,
-                                    modifier = Modifier.size(22.dp)
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(12.dp))
-                            Column {
-                                Text(
-                                    text = "دستیار هوشمند درس‌ساز (موس)",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 14.5.sp,
-                                    color = Color(0xFF312E81)
-                                )
-                                Text(
-                                    text = "طراحی درس‌های پیشرفته بر اساس سطوح CEFR",
-                                    fontSize = 11.5.sp,
-                                    color = Color(0xFF4338CA).copy(alpha = 0.85f)
-                                )
-                            }
-                        }
-
-                        Icon(
-                            imageVector = Icons.Default.PlayArrow,
-                            contentDescription = null,
-                            tint = Color(0xFF4338CA),
-                            modifier = Modifier.size(24.dp)
-                        )
-                    }
-                }
             }
 
             // Lessons List Header
@@ -723,7 +659,6 @@ fun HomeScreen(
                 }
                 val progress = if (totalWordsInLesson > 0) learnedInLesson.toFloat() / totalWordsInLesson.toFloat() else 0f
                 val isCustom = overrideLessonNumbers.contains(lesson.number) || lesson.number > 8 || !lesson.id.startsWith("lesson_")
-                val isFromMuse = lesson.source?.trim()?.lowercase() == "muse"
 
                 Card(
                     modifier = Modifier
@@ -763,14 +698,14 @@ fun HomeScreen(
                                         modifier = Modifier
                                             .size(44.dp)
                                             .clip(CircleShape)
-                                            .background(if (isFromMuse) Color(0xFF6366F1).copy(alpha = 0.2f) else MaterialTheme.colorScheme.primaryContainer),
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
                                         contentAlignment = Alignment.Center
                                     ) {
                                         Text(
                                             text = "${lesson.number}",
                                             fontWeight = FontWeight.Bold,
                                             fontSize = 17.sp,
-                                            color = if (isFromMuse) Color(0xFF4338CA) else MaterialTheme.colorScheme.onPrimaryContainer
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
                                         )
                                     }
                                 }
@@ -784,22 +719,6 @@ fun HomeScreen(
                                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                                             color = MaterialTheme.colorScheme.onSurface
                                         )
-
-                                        if (isFromMuse) {
-                                            Spacer(modifier = Modifier.width(6.dp))
-                                            Surface(
-                                                shape = RoundedCornerShape(6.dp),
-                                                color = Color(0xFF6366F1).copy(alpha = 0.15f)
-                                            ) {
-                                                Text(
-                                                    text = "ساختهٔ موس",
-                                                    fontSize = 11.sp,
-                                                    fontWeight = FontWeight.Bold,
-                                                    color = Color(0xFF4338CA),
-                                                    modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
-                                                )
-                                            }
-                                        }
                                     }
                                     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                                         Text(
