@@ -153,6 +153,7 @@ fun ExactExerciseQuestionView(
                     // Audio buttons in their own non-overlapping area
                     AudioSpeechButtons(
                         textToSpeak = exercise.question,
+                        translationDari = exercise.translationDari,
                         onPlayAudio = onPlayAudio,
                         size = 36
                     )

@@ -233,6 +233,7 @@ private fun NumbersLearningSection(
                     ) {
                         AudioSpeechButtons(
                             textToSpeak = item.germanWord,
+                            translationDari = item.persianPronunciation,
                             onPlayAudio = onPlayAudio,
                             size = 36
                         )

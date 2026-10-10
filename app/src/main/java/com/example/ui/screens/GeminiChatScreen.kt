@@ -100,8 +100,12 @@ fun GeminiChatScreen(
     val coroutineScope = rememberCoroutineScope()
     val chatService = remember { GeminiChatService() }
     val progressManager = remember { UserProgressManager.getInstance(context) }
-    val isTtsCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
-    val isVoiceActive = currentApiKey.isNotEmpty() && !isTtsCooldownActive
+    val azureKey by progressManager.azureSpeechKeyFlow.collectAsState()
+    val voiceProvider by progressManager.voiceProviderFlow.collectAsState()
+    val activeVoiceChipText = remember(voiceProvider, currentApiKey, azureKey) {
+        progressManager.getActiveVoiceChipText()
+    }
+    val isVoiceActive = activeVoiceChipText != "صدا: گوشی"
 
     val messages = remember {
         mutableStateListOf(
@@ -278,7 +282,7 @@ fun GeminiChatScreen(
                             .clickable { showApiKeyDialog = true }
                     ) {
                         Text(
-                            text = if (isVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
+                            text = activeVoiceChipText,
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 5.dp),
                             fontSize = 11.sp,
                             fontWeight = FontWeight.Bold,

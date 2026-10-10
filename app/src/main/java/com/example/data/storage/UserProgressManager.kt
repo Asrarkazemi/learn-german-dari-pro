@@ -22,6 +22,18 @@ class UserProgressManager(context: Context) {
     private val _geminiApiKeyFlow = MutableStateFlow("")
     val geminiApiKeyFlow: StateFlow<String> = _geminiApiKeyFlow.asStateFlow()
 
+    private val _azureSpeechKeyFlow = MutableStateFlow("")
+    val azureSpeechKeyFlow: StateFlow<String> = _azureSpeechKeyFlow.asStateFlow()
+
+    private val _azureSpeechRegionFlow = MutableStateFlow("eastus")
+    val azureSpeechRegionFlow: StateFlow<String> = _azureSpeechRegionFlow.asStateFlow()
+
+    private val _azureSpeechVoiceFlow = MutableStateFlow("de-DE-ConradNeural")
+    val azureSpeechVoiceFlow: StateFlow<String> = _azureSpeechVoiceFlow.asStateFlow()
+
+    private val _voiceProviderFlow = MutableStateFlow("AZURE")
+    val voiceProviderFlow: StateFlow<String> = _voiceProviderFlow.asStateFlow()
+
     private val _playbackSpeedFlow = MutableStateFlow(1.0f)
     val playbackSpeedFlow: StateFlow<Float> = _playbackSpeedFlow.asStateFlow()
 
@@ -30,6 +42,9 @@ class UserProgressManager(context: Context) {
 
     private val _dailyGeminiRequestsFlow = MutableStateFlow(0)
     val dailyGeminiRequestsFlow: StateFlow<Int> = _dailyGeminiRequestsFlow.asStateFlow()
+
+    private val _dailyAzureRequestsFlow = MutableStateFlow(0)
+    val dailyAzureRequestsFlow: StateFlow<Int> = _dailyAzureRequestsFlow.asStateFlow()
 
     private val _studyDaysFlow = MutableStateFlow<Set<String>>(emptySet())
     val studyDaysFlow: StateFlow<Set<String>> = _studyDaysFlow.asStateFlow()
@@ -47,13 +62,71 @@ class UserProgressManager(context: Context) {
         _quizHighScoreFlow.value = prefs.getInt(KEY_QUIZ_HIGH_SCORE, 0)
         _quizzesTakenCountFlow.value = prefs.getInt(KEY_QUIZZES_TAKEN_COUNT, 0)
         _geminiApiKeyFlow.value = prefs.getString(KEY_GEMINI_API_KEY, "") ?: ""
+        _azureSpeechKeyFlow.value = prefs.getString(KEY_AZURE_SPEECH_KEY, "") ?: ""
+        _azureSpeechRegionFlow.value = prefs.getString(KEY_AZURE_SPEECH_REGION, DEFAULT_AZURE_REGION) ?: DEFAULT_AZURE_REGION
+        _azureSpeechVoiceFlow.value = prefs.getString(KEY_AZURE_SPEECH_VOICE, DEFAULT_AZURE_VOICE) ?: DEFAULT_AZURE_VOICE
+        _voiceProviderFlow.value = prefs.getString(KEY_VOICE_PROVIDER, VOICE_PROVIDER_AZURE) ?: VOICE_PROVIDER_AZURE
         _playbackSpeedFlow.value = prefs.getFloat(KEY_PLAYBACK_SPEED, 1.0f)
-        _ttsCooldownActiveFlow.value = areAllTtsModelsInCooldown()
+        _ttsCooldownActiveFlow.value = false
         _dailyGeminiRequestsFlow.value = getDailyGeminiRequestsCount()
+        _dailyAzureRequestsFlow.value = getDailyAzureRequestsCount()
 
         val studyDays = prefs.getStringSet(KEY_STUDY_DAYS, emptySet()) ?: emptySet()
         _studyDaysFlow.value = studyDays
         _studyStreakFlow.value = calculateStreak(studyDays)
+    }
+
+    fun getVoiceProvider(): String = _voiceProviderFlow.value
+
+    fun setVoiceProvider(provider: String) {
+        val valid = if (provider.equals(VOICE_PROVIDER_GEMINI, ignoreCase = true)) VOICE_PROVIDER_GEMINI else VOICE_PROVIDER_AZURE
+        prefs.edit().putString(KEY_VOICE_PROVIDER, valid).apply()
+        _voiceProviderFlow.value = valid
+    }
+
+    fun getAzureSpeechKey(): String = _azureSpeechKeyFlow.value.trim()
+
+    fun saveAzureSpeechKey(key: String) {
+        val trimmed = key.trim()
+        prefs.edit().putString(KEY_AZURE_SPEECH_KEY, trimmed).apply()
+        _azureSpeechKeyFlow.value = trimmed
+    }
+
+    fun getAzureSpeechRegion(): String = _azureSpeechRegionFlow.value.trim().ifEmpty { DEFAULT_AZURE_REGION }
+
+    fun setAzureSpeechRegion(region: String) {
+        val trimmed = region.trim().ifEmpty { DEFAULT_AZURE_REGION }
+        prefs.edit().putString(KEY_AZURE_SPEECH_REGION, trimmed).apply()
+        _azureSpeechRegionFlow.value = trimmed
+    }
+
+    fun getAzureSpeechVoice(): String = _azureSpeechVoiceFlow.value.trim().ifEmpty { DEFAULT_AZURE_VOICE }
+
+    fun setAzureSpeechVoice(voice: String) {
+        val trimmed = voice.trim().ifEmpty { DEFAULT_AZURE_VOICE }
+        prefs.edit().putString(KEY_AZURE_SPEECH_VOICE, trimmed).apply()
+        _azureSpeechVoiceFlow.value = trimmed
+    }
+
+    fun getActiveVoiceProvider(): String {
+        val chosen = getVoiceProvider()
+        val hasAzure = getAzureSpeechKey().isNotEmpty()
+        val hasGemini = getEffectiveGeminiApiKey().isNotEmpty()
+        return when {
+            chosen == VOICE_PROVIDER_AZURE && hasAzure -> VOICE_PROVIDER_AZURE
+            chosen == VOICE_PROVIDER_GEMINI && hasGemini -> VOICE_PROVIDER_GEMINI
+            hasAzure -> VOICE_PROVIDER_AZURE
+            hasGemini -> VOICE_PROVIDER_GEMINI
+            else -> "DEVICE"
+        }
+    }
+
+    fun getActiveVoiceChipText(): String {
+        return when (getActiveVoiceProvider()) {
+            VOICE_PROVIDER_AZURE -> "صدا: آژور ✨"
+            VOICE_PROVIDER_GEMINI -> "صدا: جیمنای ✨"
+            else -> "صدا: گوشی"
+        }
     }
 
     fun getTodayDateKey(): String {
@@ -92,6 +165,40 @@ class UserProgressManager(context: Context) {
             .putInt("daily_tts_requests_count", count)
             .commit()
         _dailyGeminiRequestsFlow.value = if (date == getTodayDateKey()) count else 0
+    }
+
+    fun getDailyAzureRequestsCount(): Int {
+        val today = getTodayDateKey()
+        val savedDate = prefs.getString("daily_azure_requests_date", "")
+        val count = if (savedDate == today) {
+            prefs.getInt("daily_azure_requests_count", 0)
+        } else {
+            0
+        }
+        _dailyAzureRequestsFlow.value = count
+        return count
+    }
+
+    @Synchronized
+    fun incrementDailyAzureRequestsCount(): Int {
+        val today = getTodayDateKey()
+        val savedDate = prefs.getString("daily_azure_requests_date", "")
+        val current = if (savedDate == today) prefs.getInt("daily_azure_requests_count", 0) else 0
+        val newCount = current + 1
+        prefs.edit()
+            .putString("daily_azure_requests_date", today)
+            .putInt("daily_azure_requests_count", newCount)
+            .commit()
+        _dailyAzureRequestsFlow.value = newCount
+        return newCount
+    }
+
+    fun setDailyAzureRequestsForTesting(date: String, count: Int) {
+        prefs.edit()
+            .putString("daily_azure_requests_date", date)
+            .putInt("daily_azure_requests_count", count)
+            .commit()
+        _dailyAzureRequestsFlow.value = if (date == getTodayDateKey()) count else 0
     }
 
     fun areAllTtsModelsInCooldown(): Boolean {
@@ -289,6 +396,19 @@ class UserProgressManager(context: Context) {
         private const val KEY_GEMINI_API_KEY = "gemini_api_key"
         private const val KEY_PLAYBACK_SPEED = "playback_speed"
         private const val KEY_STUDY_DAYS = "study_days"
+
+        const val KEY_VOICE_PROVIDER = "voice_provider"
+        const val KEY_AZURE_SPEECH_KEY = "azure_speech_key"
+        const val KEY_AZURE_SPEECH_REGION = "azure_speech_region"
+        const val KEY_AZURE_SPEECH_VOICE = "azure_speech_voice"
+
+        const val VOICE_PROVIDER_AZURE = "AZURE"
+        const val VOICE_PROVIDER_GEMINI = "GEMINI"
+
+        const val DEFAULT_AZURE_REGION = "eastus"
+        const val DEFAULT_AZURE_VOICE = "de-DE-ConradNeural"
+        const val AZURE_VOICE_CONRAD = "de-DE-ConradNeural"
+        const val AZURE_VOICE_KLARA = "de-DE-KlaraNeural"
 
         val SUPPORTED_SPEEDS = listOf(0.5f, 0.75f, 1.0f, 1.25f, 1.5f)
 

@@ -143,8 +143,12 @@ fun MainScreen(
     }
 
     val effectiveKey = progressManager.getEffectiveGeminiApiKey()
-    val isTtsCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
-    val isGeminiVoiceActive = effectiveKey.isNotEmpty() && !isTtsCooldownActive
+    val azureKey by progressManager.azureSpeechKeyFlow.collectAsState()
+    val voiceProvider by progressManager.voiceProviderFlow.collectAsState()
+    val activeVoiceChipText = remember(voiceProvider, effectiveKey, azureKey) {
+        progressManager.getActiveVoiceChipText()
+    }
+    val isCloudVoiceActive = activeVoiceChipText != "صدا: گوشی"
 
     // Always RTL layout for Dari UI
     CompositionLocalProvider(
@@ -184,7 +188,7 @@ fun MainScreen(
                             // FIX A (2): Visible voice status in app header - clickable to open voice settings dialog
                             Surface(
                                 shape = RoundedCornerShape(12.dp),
-                                color = if (isGeminiVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
+                                color = if (isCloudVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant,
                                 modifier = Modifier
                                     .padding(start = 12.dp)
                                     .clip(RoundedCornerShape(12.dp))
@@ -198,15 +202,15 @@ fun MainScreen(
                                     Icon(
                                         imageVector = Icons.Default.GraphicEq,
                                         contentDescription = null,
-                                        tint = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        tint = if (isCloudVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant,
                                         modifier = Modifier.size(14.dp)
                                     )
                                     Spacer(modifier = Modifier.width(4.dp))
                                     Text(
-                                        text = if (isGeminiVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
+                                        text = activeVoiceChipText,
                                         fontSize = 11.sp,
                                         fontWeight = FontWeight.Bold,
-                                        color = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
+                                        color = if (isCloudVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
                                     )
                                 }
                             }
@@ -425,7 +429,8 @@ fun MainScreen(
                 },
                 onTestVoice = { key, speed ->
                     ttsManager.testGeminiVoice(speed = speed, keyOverride = key)
-                }
+                },
+                ttsManager = ttsManager
             )
         }
     }

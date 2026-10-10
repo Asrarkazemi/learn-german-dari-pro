@@ -53,7 +53,9 @@ fun AudioSpeechButtons(
     modifier: Modifier = Modifier,
     size: Int = 38,
     speedOverride: Float? = null,
-    onSpeedChange: ((Float) -> Unit)? = null
+    onSpeedChange: ((Float) -> Unit)? = null,
+    translationDari: String? = null,
+    onPlayBilingual: ((String, String?, Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val progressManager = remember { UserProgressManager.getInstance(context) }
@@ -74,8 +76,17 @@ fun AudioSpeechButtons(
         // ONE Speaker button: plays at the currently chosen speed (shows spinner and disabled while loading)
         IconButton(
             onClick = {
-                // Calls onPlayAudio with text and whether the speed is slow (<= 0.75f)
-                onPlayAudio(textToSpeak, effectiveSpeed <= 0.75f)
+                val isSlow = effectiveSpeed <= 0.75f
+                if (onPlayBilingual != null) {
+                    onPlayBilingual(textToSpeak, translationDari, isSlow)
+                } else {
+                    val fullPayload = if (!translationDari.isNullOrBlank()) {
+                        "$textToSpeak ⟦$translationDari⟧"
+                    } else {
+                        textToSpeak
+                    }
+                    onPlayAudio(fullPayload, isSlow)
+                }
             },
             enabled = !isLoading,
             modifier = Modifier

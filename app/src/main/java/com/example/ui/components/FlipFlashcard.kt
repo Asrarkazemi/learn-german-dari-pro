@@ -189,6 +189,7 @@ fun FlipFlashcard(
                             // Normal + Slow Audio Buttons (in their own non-overlapping row)
                             AudioSpeechButtons(
                                 textToSpeak = fullGerman,
+                                translationDari = item.meaningDari,
                                 onPlayAudio = onPlayAudio,
                                 size = 42
                             )
@@ -283,6 +284,7 @@ fun FlipFlashcard(
                                             ) {
                                                 AudioSpeechButtons(
                                                     textToSpeak = example.german,
+                                                    translationDari = example.meaningDari,
                                                     onPlayAudio = onPlayAudio,
                                                     size = 36
                                                 )

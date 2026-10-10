@@ -902,5 +902,124 @@ class ExampleRobolectricTest {
         val testModifier = androidx.compose.ui.Modifier.consumeTaps()
         org.junit.Assert.assertNotNull(testModifier)
     }
+
+    @Test
+    fun `verify Fix P dual-provider bilingual voice settings, request counters, and provider fallback order`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
+        val ttsManager = com.example.util.TtsManager(context)
+
+        // 1. Defaults
+        assertEquals("AZURE", com.example.data.storage.UserProgressManager.VOICE_PROVIDER_AZURE)
+        assertEquals("GEMINI", com.example.data.storage.UserProgressManager.VOICE_PROVIDER_GEMINI)
+        assertEquals("de-DE-ConradNeural", com.example.data.storage.UserProgressManager.DEFAULT_AZURE_VOICE)
+        assertEquals("eastus", com.example.data.storage.UserProgressManager.DEFAULT_AZURE_REGION)
+
+        // Set and verify Azure preferences
+        progressManager.setVoiceProvider("AZURE")
+        assertEquals("AZURE", progressManager.getVoiceProvider())
+        progressManager.saveAzureSpeechKey("test_azure_key_123")
+        assertEquals("test_azure_key_123", progressManager.getAzureSpeechKey())
+        progressManager.setAzureSpeechRegion("westeurope")
+        assertEquals("westeurope", progressManager.getAzureSpeechRegion())
+        progressManager.setAzureSpeechVoice("de-DE-ConradNeural")
+        assertEquals("de-DE-ConradNeural", progressManager.getAzureSpeechVoice())
+
+        // Voice gender and matching
+        assertTrue(ttsManager.isSelectedVoiceMale())
+        assertEquals("Charon", ttsManager.getGeminiVoiceName())
+        assertEquals("de-DE-ConradNeural", ttsManager.getAzureVoiceForSegment(isPersian = false))
+        assertEquals("fa-IR-FaridNeural", ttsManager.getAzureVoiceForSegment(isPersian = true))
+
+        // Switch to Klara (female)
+        progressManager.setAzureSpeechVoice("de-DE-KlaraNeural")
+        org.junit.Assert.assertFalse(ttsManager.isSelectedVoiceMale())
+        assertEquals("Kore", ttsManager.getGeminiVoiceName())
+        assertEquals("de-DE-KlaraNeural", ttsManager.getAzureVoiceForSegment(isPersian = false))
+        assertEquals("fa-IR-DilaraNeural", ttsManager.getAzureVoiceForSegment(isPersian = true))
+
+        // Reset to Conrad
+        progressManager.setAzureSpeechVoice("de-DE-ConradNeural")
+
+        // 2. Provider chip text
+        assertEquals("صدا: آژور ✨", progressManager.getActiveVoiceChipText())
+
+        progressManager.setVoiceProvider("GEMINI")
+        progressManager.saveGeminiApiKey("test_gemini_key_456")
+        assertEquals("صدا: جیمنای ✨", progressManager.getActiveVoiceChipText())
+
+        // When neither has key
+        progressManager.saveAzureSpeechKey("")
+        progressManager.saveGeminiApiKey("")
+        assertEquals("صدا: گوشی", progressManager.getActiveVoiceChipText())
+
+        // 3. Persisted request counters
+        val today = progressManager.getTodayDateKey()
+        progressManager.setDailyAzureRequestsForTesting(today, 5)
+        assertEquals(5, progressManager.getDailyAzureRequestsCount())
+        val incrementedAzure = progressManager.incrementDailyAzureRequestsCount()
+        assertEquals(6, incrementedAzure)
+        assertEquals(6, progressManager.getDailyAzureRequestsCount())
+
+        progressManager.setDailyGeminiRequestsForTesting(today, 2)
+        assertEquals(2, progressManager.getDailyGeminiRequestsCount())
+        val incrementedGemini = progressManager.incrementDailyGeminiRequestsCount()
+        assertEquals(3, incrementedGemini)
+        assertEquals(3, progressManager.getDailyGeminiRequestsCount())
+    }
+
+    @Test
+    fun `verify Fix P bilingual text parsing, XML escaping, and voice library provider keying`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val ttsManager = com.example.util.TtsManager(context)
+
+        // 1. Bilingual parsing: German first, Dari second
+        val parsed1 = ttsManager.parseGermanAndDari("Guten Morgen", "صبح بخیر")
+        assertEquals("Guten Morgen", parsed1.first)
+        assertEquals("صبح بخیر", parsed1.second)
+
+        val parsed2 = ttsManager.parseGermanAndDari("Hallo ⟦سلام⟧", null)
+        assertEquals("Hallo", parsed2.first)
+        assertEquals("سلام", parsed2.second)
+
+        val parsed3 = ttsManager.parseGermanAndDari("Danke (تشکر)", null)
+        assertEquals("Danke", parsed3.first)
+        assertEquals("تشکر", parsed3.second)
+
+        val parsed4 = ttsManager.parseGermanAndDari("Auf Wiedersehen | خداحافظ", null)
+        assertEquals("Auf Wiedersehen", parsed4.first)
+        assertEquals("خداحافظ", parsed4.second)
+
+        val parsed5 = ttsManager.parseGermanAndDari("Tschüss", null)
+        assertEquals("Tschüss", parsed5.first)
+        org.junit.Assert.assertNull(parsed5.second)
+
+        // 2. XML escaping for Azure SSML
+        val rawXml = "<speak test=\"1\" & 'hello'>"
+        val escaped = com.example.util.TtsManager.escapeXml(rawXml)
+        assertEquals("&lt;speak test=&quot;1&quot; &amp; &apos;hello&apos;&gt;", escaped)
+
+        // 3. Provider-aware voice library keying
+        val keyAzure = com.example.util.TtsManager.getVoiceLibraryKey("Guten Tag", "de-DE-ConradNeural", "AZURE")
+        val keyGemini = com.example.util.TtsManager.getVoiceLibraryKey("Guten Tag", "Charon", "GEMINI")
+        val keyDefault = com.example.util.TtsManager.getVoiceLibraryKey("Guten Tag")
+
+        assertTrue(keyAzure.isNotBlank())
+        assertTrue(keyGemini.isNotBlank())
+        assertTrue(keyDefault.isNotBlank())
+        // Keys should be distinct hashes
+        org.junit.Assert.assertNotEquals(keyAzure, keyGemini)
+
+        // 4. Storing both WAV and MP3 files in voice library
+        val libraryDir = com.example.util.TtsManager.getVoiceLibraryDir(context)
+        val dummyMp3 = java.io.File(libraryDir, "$keyAzure.mp3")
+        dummyMp3.writeBytes(ByteArray(256))
+
+        val foundMp3 = ttsManager.findStoredAudioFile("Guten Tag", 1.0f, "de-DE-ConradNeural", "AZURE")
+        org.junit.Assert.assertNotNull(foundMp3)
+        assertEquals(dummyMp3.absolutePath, foundMp3?.absolutePath)
+
+        dummyMp3.delete()
+    }
 }
 

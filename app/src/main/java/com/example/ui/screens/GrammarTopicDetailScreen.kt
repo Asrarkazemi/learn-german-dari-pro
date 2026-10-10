@@ -440,6 +440,7 @@ fun GrammarTopicDetailScreen(
                                     ) {
                                         AudioSpeechButtons(
                                             textToSpeak = sentence.german,
+                                            translationDari = sentence.meaningDari,
                                             onPlayAudio = onPlayAudio,
                                             size = 36
                                         )

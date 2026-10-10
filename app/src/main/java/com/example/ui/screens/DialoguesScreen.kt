@@ -223,6 +223,7 @@ fun DialoguesScreen(
                             // Normal + Slow Audio Buttons
                             AudioSpeechButtons(
                                 textToSpeak = line.german,
+                                translationDari = line.meaningDari,
                                 onPlayAudio = onPlayAudio,
                                 size = 36
                             )

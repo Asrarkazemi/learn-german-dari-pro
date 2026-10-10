@@ -457,6 +457,7 @@ private fun FlashcardsSection(
                                     ) {
                                         AudioSpeechButtons(
                                             textToSpeak = if (wordItem.article.isNotBlank()) "${wordItem.article} ${wordItem.word}" else wordItem.word,
+                                            translationDari = wordItem.meaningDari,
                                             onPlayAudio = onPlayAudio,
                                             size = 34
                                         )
@@ -799,12 +800,12 @@ private fun FullReadingSection(
                             if (isSequentialPlaying) {
                                 effectiveTts.stopSequentialPlayback()
                             } else {
-                                val germanLines = TtsManager.extractAllGermanLinesForReading(
+                                val bilingualLines = TtsManager.extractAllBilingualLinesForReading(
                                     lesson = currentLesson,
                                     stepByStepIndex = if (isStepByStepMode && hasGrammar) currentStepIndex else null
                                 )
                                 val speed = progressManager.getPlaybackSpeed()
-                                effectiveTts.startSequentialPlayback(germanLines, speed)
+                                effectiveTts.startSequentialPlayback(bilingualLines, speed)
                             }
                         },
                         modifier = Modifier
@@ -1055,6 +1056,7 @@ private fun FullReadingSection(
                             ) {
                                 AudioSpeechButtons(
                                     textToSpeak = sentence.german,
+                                    translationDari = sentence.meaningDari,
                                     onPlayAudio = onPlayAudio,
                                     size = 36
                                 )
@@ -1165,6 +1167,7 @@ private fun FullReadingSection(
                                         ) {
                                             AudioSpeechButtons(
                                                 textToSpeak = line.german,
+                                                translationDari = line.meaningDari,
                                                 onPlayAudio = onPlayAudio,
                                                 size = 34
                                             )
@@ -1316,6 +1319,7 @@ private fun QaPairsSection(
                         ) {
                             AudioSpeechButtons(
                                 textToSpeak = qa.questionGerman,
+                                translationDari = qa.questionDari,
                                 onPlayAudio = onPlayAudio,
                                 size = 34
                             )
@@ -1387,6 +1391,7 @@ private fun QaPairsSection(
                         ) {
                             AudioSpeechButtons(
                                 textToSpeak = qa.answerGerman,
+                                translationDari = qa.answerDari,
                                 onPlayAudio = onPlayAudio,
                                 size = 34
                             )

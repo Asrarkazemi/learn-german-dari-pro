@@ -334,6 +334,7 @@ private fun QuizCompletedScreen(
 
                         AudioSpeechButtons(
                             textToSpeak = ex.question,
+                            translationDari = ex.translationDari,
                             onPlayAudio = onPlayAudio,
                             size = 34
                         )

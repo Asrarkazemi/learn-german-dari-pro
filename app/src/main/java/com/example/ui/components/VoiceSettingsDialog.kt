@@ -74,33 +74,43 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 /**
- * FIX K & FIX L: Quota-aware VoiceSettingsDialog with:
- * 1) Password-masked API key field with show/hide eye toggle
- * 2) Honest status chip: shows «صدا: گوشی» when in quota cooldown
- * 3) Prominent Dari note about quota limits and device voice fallback
- * 4) Test button with clean Dari error mapping (raw English errors excluded)
- * 5) PERMANENT VOICE LIBRARY: Live count & size «حافظهٔ صدا: N جمله ذخیره شده (X مگابایت)»
- * 6) EXPORT VOICE LIBRARY: Button «خروجی گرفتن از حافظهٔ صدا» -> voice-library.zip share sheet
- * 7) IMPORT VOICE LIBRARY: Button «وارد کردن حافظهٔ صدا» -> file picker + merge-by-filename + zip-slip defense
- *    + exact Dari report: «N جملهٔ تازه اضافه شد — M جمله از قبل بود»
- * 8) Clear library button with confirmation dialog
+ * Phase 2 — amended Fix P: Dual-Provider Voice Settings Dialog:
+ * 1) Voice-provider selector «Microsoft Azure» / «Google Gemini».
+ * 2) Azure settings: masked key field (azure_speech_key), region (azure_speech_region, default eastus),
+ *    voice selector: de-DE-ConradNeural «مرد — کنراد» DEFAULT / de-DE-KlaraNeural «زن — کلارا».
+ * 3) Gemini settings: masked key field (gemini_api_key), voices by gender (Charon / Kore).
+ * 4) Status chip: «صدا: آژور ✨» / «صدا: جیمنای ✨» / «صدا: گوشی».
+ * 5) Per-provider persisted request counters.
+ * 6) Bilingual test voice button with honest short Dari error messages.
+ * 7) Voice Library: live sentence count & MB stats + clear + ZIP export/import (.wav & .mp3).
  */
 @Composable
 fun VoiceSettingsDialog(
     currentKey: String,
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
-    onTestVoice: suspend (key: String, speed: Float) -> Result<String>
+    onTestVoice: suspend (key: String, speed: Float) -> Result<String>,
+    ttsManager: TtsManager? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
     val progressManager = remember { UserProgressManager.getInstance(context) }
-    val currentSpeed by progressManager.playbackSpeedFlow.collectAsState()
-    val isCooldownActive by progressManager.ttsCooldownActiveFlow.collectAsState()
-    val dailyRequestsCount by progressManager.dailyGeminiRequestsFlow.collectAsState()
+    val effectiveTts = ttsManager ?: remember { TtsManager(context) }
 
-    var keyText by remember { mutableStateOf(currentKey) }
-    var isKeyVisible by remember { mutableStateOf(false) }
+    val currentSpeed by progressManager.playbackSpeedFlow.collectAsState()
+    val dailyGeminiRequestsCount by progressManager.dailyGeminiRequestsFlow.collectAsState()
+    val dailyAzureRequestsCount by progressManager.dailyAzureRequestsFlow.collectAsState()
+
+    var selectedProvider by remember { mutableStateOf(progressManager.getVoiceProvider()) }
+
+    var geminiKeyText by remember { mutableStateOf(currentKey.ifEmpty { progressManager.getEffectiveGeminiApiKey() }) }
+    var isGeminiKeyVisible by remember { mutableStateOf(false) }
+
+    var azureKeyText by remember { mutableStateOf(progressManager.getAzureSpeechKey()) }
+    var isAzureKeyVisible by remember { mutableStateOf(false) }
+    var azureRegionText by remember { mutableStateOf(progressManager.getAzureSpeechRegion()) }
+    var selectedVoice by remember { mutableStateOf(progressManager.getAzureSpeechVoice()) }
+
     var isTesting by remember { mutableStateOf(false) }
     var isExporting by remember { mutableStateOf(false) }
     var isImporting by remember { mutableStateOf(false) }
@@ -115,9 +125,18 @@ fun VoiceSettingsDialog(
     var importReportMessage by remember { mutableStateOf<String?>(null) }
     var isImportError by remember { mutableStateOf(false) }
 
-    val hasKey = keyText.trim().isNotBlank()
-    // Honest voice status: if in cooldown, voice is temporarily phone TTS
-    val isGeminiVoiceActive = hasKey && !isCooldownActive
+    // Active voice status chip calculation
+    val activeChipText = remember(selectedProvider, azureKeyText, geminiKeyText) {
+        val hasAzure = azureKeyText.trim().isNotBlank()
+        val hasGemini = geminiKeyText.trim().isNotBlank()
+        when {
+            selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE && hasAzure -> "صدا: آژور ✨"
+            selectedProvider == UserProgressManager.VOICE_PROVIDER_GEMINI && hasGemini -> "صدا: جیمنای ✨"
+            hasAzure -> "صدا: آژور ✨"
+            hasGemini -> "صدا: جیمنای ✨"
+            else -> "صدا: گوشی"
+        }
+    }
 
     // File picker launcher for ZIP import
     val openDocumentLauncher = rememberLauncherForActivityResult(
@@ -165,35 +184,29 @@ fun VoiceSettingsDialog(
         }
     }
 
-    fun mapErrorToDari(rawError: String?): String {
+    fun mapErrorToDari(rawError: String?, provider: String): String {
         if (rawError.isNullOrBlank()) {
             return "خطا در ارتباط با سرویس صوتی؛ لطفاً بعداً دوباره امتحان کنید."
         }
         val lower = rawError.lowercase()
         return when {
-            rawError.contains(TtsManager.QUOTA_EXCEEDED_DARI_MSG) ||
-                    lower.contains("quota") ||
-                    lower.contains("429") ||
-                    lower.contains("resource_exhausted") ||
-                    lower.contains("exceeded") -> {
-                TtsManager.QUOTA_EXCEEDED_DARI_MSG
+            lower.contains("401") || lower.contains("403") ||
+                    lower.contains("api_key_invalid") || lower.contains("invalid api key") ||
+                    lower.contains("authentication") || rawError.contains("کلید") -> {
+                if (provider == UserProgressManager.VOICE_PROVIDER_AZURE) {
+                    "کلید API سرویس صوتی آژور (Azure) نامعتبر است. لطفاً کلید صحیح را در تنظیمات وارد نمایید."
+                } else {
+                    "کلید API جیمنای نامعتبر است. لطفاً کلید صحیح خود را از Google AI Studio وارد نمایید."
+                }
             }
-            lower.contains("api_key_invalid") ||
-                    lower.contains("api key not valid") ||
-                    lower.contains("invalid api key") ||
-                    lower.contains("401") ||
-                    lower.contains("403") ||
-                    rawError.contains("کلید") -> {
-                "کلید API جیمنای نامعتبر است. لطفاً کلید صحیح خود را از Google AI Studio وارد نمایید."
+            lower.contains("quota") || lower.contains("429") || lower.contains("resource_exhausted") -> {
+                "سهمیهٔ این سرویس صوتی موقتاً به پایان رسیده است؛ سیستم به صورت خودکار از سرویس جایگزین استفاده می‌کند."
             }
-            lower.contains("timeout") ||
-                    lower.contains("connect") ||
-                    lower.contains("unknownhost") ||
-                    lower.contains("internet") -> {
+            lower.contains("timeout") || lower.contains("connect") || lower.contains("network") || lower.contains("internet") -> {
                 "خطا در اتصال به اینترنت؛ لطفاً اتصال شبکه خود را بررسی کرده و دوباره تلاش کنید."
             }
             else -> {
-                "خطا در برقراری ارتباط با سرویس صوتی؛ لطفاً بعداً دوباره امتحان کنید."
+                rawError
             }
         }
     }
@@ -220,7 +233,7 @@ fun VoiceSettingsDialog(
             },
             text = {
                 Text(
-                    text = "آیا مطمئن هستید که می‌خواهید تمام فایل‌های صوتی ذخیره‌شده (${libraryStats.count} جمله) را پاک کنید؟ در دفعات بعدی برای پخش این جمله‌ها با صدای جیمنای نیاز به سهمیه یا اینترنت خواهد بود.",
+                    text = "آیا مطمئن هستید که می‌خواهید تمام فایل‌های صوتی ذخیره‌شده (${libraryStats.count} جمله) را پاک کنید؟",
                     style = MaterialTheme.typography.bodyMedium,
                     lineHeight = 20.sp
                 )
@@ -232,7 +245,7 @@ fun VoiceSettingsDialog(
                         TtsManager.clearVoiceLibrary(context)
                         libraryStats = TtsManager.getVoiceLibraryStats(context)
                         importReportMessage = null
-                        Toast.makeText(context, "حافظهٔ صدای جیمنای با موفقیت پاک شد.", Toast.LENGTH_SHORT).show()
+                        Toast.makeText(context, "حافظهٔ صدا با موفقیت پاک شد.", Toast.LENGTH_SHORT).show()
                     },
                     colors = ButtonDefaults.buttonColors(containerColor = ErrorRed),
                     modifier = Modifier.testTag("btn_confirm_clear_voice_library")
@@ -270,7 +283,7 @@ fun VoiceSettingsDialog(
                 }
                 Spacer(modifier = Modifier.width(10.dp))
                 Text(
-                    text = "تنظیمات صدای جیمنای و سرعت",
+                    text = "تنظیمات پیشرفتهٔ صدا و گوینده",
                     fontWeight = FontWeight.Bold,
                     fontSize = 17.sp
                 )
@@ -283,54 +296,310 @@ fun VoiceSettingsDialog(
                     .verticalScroll(rememberScrollState())
             ) {
                 Text(
-                    text = "کلید API در حافظه امن تلفن شما ذخیره شده و برای تولید صدای طبیعی آلمانی استفاده می‌شود.",
+                    text = "سیستم صوتی دوگانه و دوزبانه (آلمانی + ترجمهٔ دری). در صورت بروز خطا در سرویس انتخاب‌شده، سرویس دیگر و سپس صدای گوشی به صورت خودکار جایگزین می‌گردد.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 19.sp
                 )
 
-                Spacer(modifier = Modifier.height(12.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
-                // KEY FIELD PRIVACY: Password-style visual transformation + eye toggle
-                OutlinedTextField(
-                    value = keyText,
-                    onValueChange = {
-                        keyText = it
-                        testResultSuccess = null
-                        testResultError = null
-                    },
-                    label = { Text("کلید API جیمنای") },
-                    placeholder = { Text("AIzaSy...") },
-                    visualTransformation = if (isKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                    trailingIcon = {
-                        IconButton(
-                            onClick = { isKeyVisible = !isKeyVisible },
-                            modifier = Modifier.testTag("btn_toggle_key_visibility")
-                        ) {
-                            Icon(
-                                imageVector = if (isKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                contentDescription = if (isKeyVisible) "مخفی‌سازی کلید" else "نمایش کلید",
-                                tint = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                        }
-                    },
-                    modifier = Modifier
-                        .fillMaxWidth()
-                        .testTag("gemini_api_key_dialog_input"),
-                    shape = RoundedCornerShape(12.dp),
-                    singleLine = true
+                // PROVIDER SELECTOR: Microsoft Azure / Google Gemini
+                Text(
+                    text = "موتور اصلی تولید صدا:",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = MaterialTheme.colorScheme.onSurface
                 )
 
-                Spacer(modifier = Modifier.height(10.dp))
+                Spacer(modifier = Modifier.height(6.dp))
 
-                // HONEST STATUS: Status chip shows «صدا: گوشی» during cooldown
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isAzure = selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE
+                    FilterChip(
+                        selected = isAzure,
+                        onClick = {
+                            selectedProvider = UserProgressManager.VOICE_PROVIDER_AZURE
+                            testResultSuccess = null
+                            testResultError = null
+                        },
+                        label = {
+                            Text(
+                                text = "Microsoft Azure",
+                                fontWeight = if (isAzure) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("provider_chip_azure"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+
+                    val isGemini = selectedProvider == UserProgressManager.VOICE_PROVIDER_GEMINI
+                    FilterChip(
+                        selected = isGemini,
+                        onClick = {
+                            selectedProvider = UserProgressManager.VOICE_PROVIDER_GEMINI
+                            testResultSuccess = null
+                            testResultError = null
+                        },
+                        label = {
+                            Text(
+                                text = "Google Gemini",
+                                fontWeight = if (isGemini) FontWeight.Bold else FontWeight.Normal
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("provider_chip_gemini"),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        )
+                    )
+                }
+
+                Spacer(modifier = Modifier.height(14.dp))
+
+                // PROVIDER-SPECIFIC SETTINGS
+                if (selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE) {
+                    // AZURE SPEECH SETTINGS
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "تنظیمات سرویس Microsoft Azure Speech:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Azure Speech Key with show/hide
+                            OutlinedTextField(
+                                value = azureKeyText,
+                                onValueChange = {
+                                    azureKeyText = it
+                                    testResultSuccess = null
+                                    testResultError = null
+                                },
+                                label = { Text("کلید اشتراک Azure Speech Key") },
+                                placeholder = { Text("مثال: 32 کاراکتر هگزادسیمال") },
+                                visualTransformation = if (isAzureKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = { isAzureKeyVisible = !isAzureKeyVisible },
+                                        modifier = Modifier.testTag("btn_toggle_azure_key_visibility")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isAzureKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (isAzureKeyVisible) "مخفی‌سازی کلید" else "نمایش کلید",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("azure_speech_key_input"),
+                                shape = RoundedCornerShape(10.dp),
+                                singleLine = true
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Azure Region
+                            OutlinedTextField(
+                                value = azureRegionText,
+                                onValueChange = {
+                                    azureRegionText = it
+                                    testResultSuccess = null
+                                    testResultError = null
+                                },
+                                label = { Text("منطقه (Region)") },
+                                placeholder = { Text("eastus") },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("azure_speech_region_input"),
+                                shape = RoundedCornerShape(10.dp),
+                                singleLine = true
+                            )
+
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Voice Selector: Conrad / Klara
+                            Text(
+                                text = "گوینده آلمانی و فارسی:",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.SemiBold,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                            ) {
+                                val isConrad = selectedVoice == UserProgressManager.AZURE_VOICE_CONRAD
+                                FilterChip(
+                                    selected = isConrad,
+                                    onClick = {
+                                        selectedVoice = UserProgressManager.AZURE_VOICE_CONRAD
+                                        testResultSuccess = null
+                                        testResultError = null
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "مرد — کنراد",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isConrad) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("azure_voice_conrad_chip")
+                                )
+
+                                val isKlara = selectedVoice == UserProgressManager.AZURE_VOICE_KLARA
+                                FilterChip(
+                                    selected = isKlara,
+                                    onClick = {
+                                        selectedVoice = UserProgressManager.AZURE_VOICE_KLARA
+                                        testResultSuccess = null
+                                        testResultError = null
+                                    },
+                                    label = {
+                                        Text(
+                                            text = "زن — کلارا",
+                                            fontSize = 12.sp,
+                                            fontWeight = if (isKlara) FontWeight.Bold else FontWeight.Normal
+                                        )
+                                    },
+                                    modifier = Modifier
+                                        .weight(1f)
+                                        .testTag("azure_voice_klara_chip")
+                                )
+                            }
+
+                            Spacer(modifier = Modifier.height(4.dp))
+                            val voiceHint = if (selectedVoice == UserProgressManager.AZURE_VOICE_CONRAD) {
+                                "گوینده آلمانی: ConradNeural | گوینده فارسی/دری: FaridNeural"
+                            } else {
+                                "گوینده آلمانی: KlaraNeural | گوینده فارسی/دری: DilaraNeural"
+                            }
+                            Text(
+                                text = voiceHint,
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Daily Azure requests counter
+                            val azureDailyPersian = UserProgressManager.toPersianDigits("$dailyAzureRequestsCount")
+                            Text(
+                                text = "درخواست‌های امروز به آژور: $azureDailyPersian",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.testTag("daily_azure_requests_text")
+                            )
+                        }
+                    }
+                } else {
+                    // GEMINI SETTINGS
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Column(modifier = Modifier.padding(12.dp)) {
+                            Text(
+                                text = "تنظیمات سرویس Google Gemini:",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            // Gemini API key field with show/hide
+                            OutlinedTextField(
+                                value = geminiKeyText,
+                                onValueChange = {
+                                    geminiKeyText = it
+                                    testResultSuccess = null
+                                    testResultError = null
+                                },
+                                label = { Text("کلید API جیمنای") },
+                                placeholder = { Text("AIzaSy...") },
+                                visualTransformation = if (isGeminiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                                trailingIcon = {
+                                    IconButton(
+                                        onClick = { isGeminiKeyVisible = !isGeminiKeyVisible },
+                                        modifier = Modifier.testTag("btn_toggle_gemini_key_visibility")
+                                    ) {
+                                        Icon(
+                                            imageVector = if (isGeminiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                            contentDescription = if (isGeminiKeyVisible) "مخفی‌سازی کلید" else "نمایش کلید",
+                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("gemini_api_key_dialog_input"),
+                                shape = RoundedCornerShape(10.dp),
+                                singleLine = true
+                            )
+
+                            Spacer(modifier = Modifier.height(8.dp))
+
+                            Text(
+                                text = "گوینده جیمنای: به صورت خودکار بر اساس جنسیت گوینده تنظیم می‌شود (مرد: Charon / زن: Kore).",
+                                style = MaterialTheme.typography.bodySmall,
+                                fontSize = 11.sp,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Spacer(modifier = Modifier.height(6.dp))
+
+                            // Daily Gemini API requests counter
+                            val geminiDailyPersian = UserProgressManager.toPersianDigits("$dailyGeminiRequestsCount")
+                            Text(
+                                text = "درخواست‌های امروز به جیمنای: $geminiDailyPersian",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Medium,
+                                modifier = Modifier.testTag("daily_gemini_requests_text")
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.height(12.dp))
+
+                // ACTIVE STATUS CHIP: «صدا: آژور ✨» / «صدا: جیمنای ✨» / «صدا: گوشی»
                 Row(
                     modifier = Modifier.fillMaxWidth(),
                     horizontalArrangement = Arrangement.SpaceBetween,
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "وضعیت موتور صدا:",
+                        text = "وضعیت گوینده فعال:",
                         style = MaterialTheme.typography.labelMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -338,70 +607,21 @@ fun VoiceSettingsDialog(
 
                     Surface(
                         shape = RoundedCornerShape(10.dp),
-                        color = if (isGeminiVoiceActive) Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant
+                        color = if (activeChipText != "صدا: گوشی") Color(0xFFE0E7FF) else MaterialTheme.colorScheme.surfaceVariant
                     ) {
                         Text(
-                            text = if (isGeminiVoiceActive) "صدا: جیمنای ✨" else "صدا: گوشی",
+                            text = activeChipText,
                             modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold,
-                            color = if (isGeminiVoiceActive) Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
+                            color = if (activeChipText != "صدا: گوشی") Color(0xFF3730A3) else MaterialTheme.colorScheme.onSurfaceVariant
                         )
                     }
                 }
 
-                // FIX M: Daily Gemini API requests counter
-                Spacer(modifier = Modifier.height(4.dp))
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                    verticalAlignment = Alignment.CenterVertically
-                ) {
-                    val dailyPersian = UserProgressManager.toPersianDigits("$dailyRequestsCount")
-                    Text(
-                        text = "درخواست\u200Cهای امروز به جیمنای: $dailyPersian",
-                        style = MaterialTheme.typography.labelSmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        fontWeight = FontWeight.Medium,
-                        modifier = Modifier.testTag("daily_gemini_requests_text")
-                    )
-                }
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // QUOTA COOLDOWN NOTE: Clear Dari explanation when quota is exhausted
-                if (isCooldownActive) {
-                    Spacer(modifier = Modifier.height(10.dp))
-                    Surface(
-                        shape = RoundedCornerShape(10.dp),
-                        color = AccentAmber.copy(alpha = 0.12f),
-                        border = BorderStroke(1.dp, AccentAmber.copy(alpha = 0.35f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Row(
-                            modifier = Modifier.padding(10.dp),
-                            verticalAlignment = Alignment.Top
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Info,
-                                contentDescription = null,
-                                tint = AccentAmber,
-                                modifier = Modifier
-                                    .size(18.dp)
-                                    .padding(top = 2.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = TtsManager.QUOTA_EXCEEDED_DARI_MSG,
-                                style = MaterialTheme.typography.bodySmall,
-                                color = MaterialTheme.colorScheme.onSurface,
-                                lineHeight = 18.sp
-                            )
-                        }
-                    }
-                }
-
-                Spacer(modifier = Modifier.height(14.dp))
-
-                // Adjustable speed setting (app-wide)
+                // PLAYBACK SPEED SELECTOR (0.5x - 1.5x)
                 Row(
                     verticalAlignment = Alignment.CenterVertically,
                     modifier = Modifier.fillMaxWidth()
@@ -448,33 +668,40 @@ fun VoiceSettingsDialog(
                                 .weight(1f)
                                 .testTag("dialog_speed_chip_${speedVal}"),
                             colors = FilterChipDefaults.filterChipColors(
-                                selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                                selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                                selectedContainerColor = MaterialTheme.colorScheme.secondaryContainer,
+                                selectedLabelColor = MaterialTheme.colorScheme.onSecondaryContainer
                             )
                         )
                     }
                 }
 
-                Spacer(modifier = Modifier.height(14.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                // Test Gemini voice button with current speed & quota handling
+                // TEST VOICE BUTTON (Bilingual Test)
                 OutlinedButton(
                     onClick = {
+                        isTesting = true
                         testResultSuccess = null
                         testResultError = null
-                        isTesting = true
                         coroutineScope.launch {
-                            val res = onTestVoice(keyText.trim(), currentSpeed)
+                            val result = effectiveTts.testVoice(
+                                sampleGerman = "Guten Tag! Ich lerne Deutsch.",
+                                sampleDari = "روز بخیر! من آلمانی یاد می‌گیرم.",
+                                speed = currentSpeed,
+                                providerOverride = selectedProvider,
+                                keyOverride = if (selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE) azureKeyText else geminiKeyText,
+                                regionOverride = azureRegionText,
+                                voiceOverride = selectedVoice
+                            )
                             isTesting = false
-                            if (res.isSuccess) {
-                                val msg = res.getOrThrow()
-                                testResultSuccess = msg
-                                // Refresh library stats after successful voice test
+                            if (result.isSuccess) {
+                                testResultSuccess = result.getOrNull()
+                                testResultError = null
                                 libraryStats = TtsManager.getVoiceLibraryStats(context)
-                                Toast.makeText(context, msg, Toast.LENGTH_SHORT).show()
                             } else {
-                                val rawErrMsg = res.exceptionOrNull()?.localizedMessage
-                                testResultError = mapErrorToDari(rawErrMsg)
+                                val rawErr = result.exceptionOrNull()?.message
+                                testResultError = mapErrorToDari(rawErr, selectedProvider)
+                                testResultSuccess = null
                             }
                         }
                     },
@@ -487,19 +714,23 @@ fun VoiceSettingsDialog(
                     if (isTesting) {
                         CircularProgressIndicator(modifier = Modifier.size(16.dp), strokeWidth = 2.dp)
                         Spacer(modifier = Modifier.width(6.dp))
-                        Text("در حال پخش با سرعت ${UserProgressManager.formatSpeedToPersian(currentSpeed)}...", fontSize = 12.sp)
+                        Text("در حال آزمایش صدا...", fontSize = 12.sp)
                     } else {
-                        Icon(imageVector = Icons.AutoMirrored.Filled.VolumeUp, contentDescription = null, modifier = Modifier.size(18.dp))
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.VolumeUp,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
                         Spacer(modifier = Modifier.width(6.dp))
                         Text(
-                            text = "امتحان صدا با سرعت ${UserProgressManager.formatSpeedToPersian(currentSpeed)}",
+                            text = "آزمایش صدای دو زبانه (آلمانی + دری)",
                             fontSize = 12.sp,
                             fontWeight = FontWeight.Bold
                         )
                     }
                 }
 
-                // Success Message Card
+                // Success Card
                 AnimatedVisibility(visible = testResultSuccess != null) {
                     testResultSuccess?.let { msg ->
                         Surface(
@@ -507,7 +738,7 @@ fun VoiceSettingsDialog(
                             color = SuccessGreen.copy(alpha = 0.12f),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 10.dp)
+                                .padding(top = 8.dp)
                         ) {
                             Row(
                                 modifier = Modifier.padding(10.dp),
@@ -531,42 +762,33 @@ fun VoiceSettingsDialog(
                     }
                 }
 
-                // Error Message Card (Clean Dari failure reason - raw English excluded)
+                // Error Card
                 AnimatedVisibility(visible = testResultError != null) {
                     testResultError?.let { err ->
                         Surface(
                             shape = RoundedCornerShape(10.dp),
-                            color = if (err == TtsManager.QUOTA_EXCEEDED_DARI_MSG) AccentAmber.copy(alpha = 0.12f) else ErrorRed.copy(alpha = 0.12f),
+                            color = ErrorRed.copy(alpha = 0.12f),
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(top = 10.dp)
+                                .padding(top = 8.dp)
                         ) {
                             Row(
                                 modifier = Modifier.padding(10.dp),
                                 verticalAlignment = Alignment.Top
                             ) {
                                 Icon(
-                                    imageVector = if (err == TtsManager.QUOTA_EXCEEDED_DARI_MSG) Icons.Default.Info else Icons.Default.Warning,
+                                    imageVector = Icons.Default.Warning,
                                     contentDescription = null,
-                                    tint = if (err == TtsManager.QUOTA_EXCEEDED_DARI_MSG) AccentAmber else ErrorRed,
+                                    tint = ErrorRed,
                                     modifier = Modifier.size(18.dp)
                                 )
                                 Spacer(modifier = Modifier.width(8.dp))
-                                Column {
-                                    Text(
-                                        text = if (err == TtsManager.QUOTA_EXCEEDED_DARI_MSG) "وضعیت سهمیه صدای جیمنای:" else "خطا در آزمایش صدا:",
-                                        color = if (err == TtsManager.QUOTA_EXCEEDED_DARI_MSG) AccentAmber else ErrorRed,
-                                        fontSize = 12.sp,
-                                        fontWeight = FontWeight.Bold
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    Text(
-                                        text = err,
-                                        color = MaterialTheme.colorScheme.onSurface,
-                                        fontSize = 11.sp,
-                                        lineHeight = 16.sp
-                                    )
-                                }
+                                Text(
+                                    text = err,
+                                    color = MaterialTheme.colorScheme.onSurface,
+                                    fontSize = 11.sp,
+                                    lineHeight = 16.sp
+                                )
                             }
                         }
                     }
@@ -574,7 +796,7 @@ fun VoiceSettingsDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // PERMANENT IN-APP VOICE LIBRARY SECTION (FIX K & FIX L)
+                // PERMANENT IN-APP VOICE LIBRARY SECTION
                 Surface(
                     shape = RoundedCornerShape(12.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
@@ -596,7 +818,7 @@ fun VoiceSettingsDialog(
                             )
                             Spacer(modifier = Modifier.width(8.dp))
                             Text(
-                                text = "حافظهٔ صدای جیمنای (ذخیرهٔ دائمی)",
+                                text = "حافظهٔ صدای برنامه (ذخیرهٔ دائمی)",
                                 style = MaterialTheme.typography.labelLarge,
                                 fontWeight = FontWeight.Bold,
                                 color = MaterialTheme.colorScheme.onSurface
@@ -617,7 +839,7 @@ fun VoiceSettingsDialog(
                         Spacer(modifier = Modifier.height(4.dp))
 
                         Text(
-                            text = "جملاتی که با صدای جیمنای پخش می‌شوند به صورت خودکار در حافظه داخلی ذخیره شده و در دفعات بعد بدون نیاز به اینترنت یا سهمیه پخش می‌گردند.",
+                            text = "جملاتی که یک‌بار با صدای آژور یا جیمنای پخش شوند در حافظه داخلی ذخیره شده و دفعات بعد با سرعت بالا و بدون نیاز به اینترنت پخش می‌شوند.",
                             style = MaterialTheme.typography.bodySmall,
                             color = MaterialTheme.colorScheme.onSurfaceVariant,
                             lineHeight = 17.sp
@@ -625,7 +847,7 @@ fun VoiceSettingsDialog(
 
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        // 1) EXPORT BUTTON: «خروجی گرفتن از حافظهٔ صدا»
+                        // EXPORT BUTTON: «خروجی گرفتن از حافظهٔ صدا»
                         OutlinedButton(
                             onClick = {
                                 if (libraryStats.count == 0) {
@@ -680,7 +902,7 @@ fun VoiceSettingsDialog(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // 2) IMPORT BUTTON: «وارد کردن حافظهٔ صدا»
+                        // IMPORT BUTTON: «وارد کردن حافظهٔ صدا»
                         OutlinedButton(
                             onClick = {
                                 importReportMessage = null
@@ -717,7 +939,7 @@ fun VoiceSettingsDialog(
                             }
                         }
 
-                        // 3) DARI REPORT CARD: «N جملهٔ تازه اضافه شد — M جمله از قبل بود»
+                        // DARI REPORT CARD: «N جملهٔ تازه اضافه شد — M جمله از قبل بود»
                         AnimatedVisibility(visible = importReportMessage != null) {
                             importReportMessage?.let { reportText ->
                                 Surface(
@@ -753,34 +975,25 @@ fun VoiceSettingsDialog(
 
                         Spacer(modifier = Modifier.height(6.dp))
 
-                        // 4) CLEAR BUTTON: «پاک کردن حافظهٔ صدا»
-                        OutlinedButton(
+                        // CLEAR VOICE LIBRARY BUTTON
+                        TextButton(
                             onClick = { showClearConfirmDialog = true },
-                            enabled = libraryStats.count > 0 && !isTesting && !isExporting && !isImporting,
+                            enabled = !isTesting && !isExporting && !isImporting && libraryStats.count > 0,
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .testTag("btn_clear_voice_library"),
-                            shape = RoundedCornerShape(8.dp),
-                            colors = ButtonDefaults.outlinedButtonColors(
-                                contentColor = ErrorRed
-                            ),
-                            border = BorderStroke(
-                                1.dp,
-                                if (libraryStats.count > 0) ErrorRed.copy(alpha = 0.5f) else MaterialTheme.colorScheme.outlineVariant
-                            )
+                                .align(Alignment.CenterHorizontally)
+                                .testTag("btn_clear_voice_library")
                         ) {
                             Icon(
                                 imageVector = Icons.Default.Delete,
                                 contentDescription = null,
-                                modifier = Modifier.size(16.dp),
-                                tint = if (libraryStats.count > 0) ErrorRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                tint = if (libraryStats.count > 0) ErrorRed else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f),
+                                modifier = Modifier.size(15.dp)
                             )
-                            Spacer(modifier = Modifier.width(6.dp))
+                            Spacer(modifier = Modifier.width(4.dp))
                             Text(
                                 text = "پاک کردن حافظهٔ صدا",
                                 fontSize = 12.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = if (libraryStats.count > 0) ErrorRed else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.38f)
+                                color = if (libraryStats.count > 0) ErrorRed else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.5f)
                             )
                         }
                     }
@@ -789,14 +1002,24 @@ fun VoiceSettingsDialog(
         },
         confirmButton = {
             Button(
-                onClick = { onSave(keyText.trim()) },
-                modifier = Modifier.testTag("btn_save_gemini_api_key")
+                onClick = {
+                    progressManager.setVoiceProvider(selectedProvider)
+                    progressManager.saveAzureSpeechKey(azureKeyText.trim())
+                    progressManager.setAzureSpeechRegion(azureRegionText.trim())
+                    progressManager.setAzureSpeechVoice(selectedVoice)
+                    onSave(geminiKeyText.trim())
+                    onDismiss()
+                },
+                modifier = Modifier.testTag("btn_save_voice_settings")
             ) {
-                Text("ذخیره کلید", fontWeight = FontWeight.Bold)
+                Text("ذخیره تنظیمات")
             }
         },
         dismissButton = {
-            TextButton(onClick = onDismiss) {
+            TextButton(
+                onClick = onDismiss,
+                modifier = Modifier.testTag("btn_dismiss_voice_settings")
+            ) {
                 Text("انصراف")
             }
         }
