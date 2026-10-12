@@ -90,7 +90,8 @@ fun VoiceSettingsDialog(
     onDismiss: () -> Unit,
     onSave: (String) -> Unit,
     onTestVoice: suspend (key: String, speed: Float) -> Result<String>,
-    ttsManager: TtsManager? = null
+    ttsManager: TtsManager? = null,
+    initialProvider: String? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -101,7 +102,7 @@ fun VoiceSettingsDialog(
     val dailyGeminiRequestsCount by progressManager.dailyGeminiRequestsFlow.collectAsState()
     val dailyAzureRequestsCount by progressManager.dailyAzureRequestsFlow.collectAsState()
 
-    var selectedProvider by remember { mutableStateOf(progressManager.getVoiceProvider()) }
+    var selectedProvider by remember { mutableStateOf(initialProvider ?: progressManager.getVoiceProvider()) }
 
     var geminiKeyText by remember { mutableStateOf(currentKey.ifEmpty { progressManager.getEffectiveGeminiApiKey() }) }
     var isGeminiKeyVisible by remember { mutableStateOf(false) }
@@ -319,50 +320,64 @@ fun VoiceSettingsDialog(
                     horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
                     val isAzure = selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE
-                    FilterChip(
-                        selected = isAzure,
+                    Surface(
                         onClick = {
                             selectedProvider = UserProgressManager.VOICE_PROVIDER_AZURE
                             testResultSuccess = null
                             testResultError = null
                         },
-                        label = {
-                            Text(
-                                text = "Microsoft Azure",
-                                fontWeight = if (isAzure) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isAzure) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(
+                            width = if (isAzure) 1.5.dp else 1.dp,
+                            color = if (isAzure) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        ),
                         modifier = Modifier
                             .weight(1f)
-                            .testTag("provider_chip_azure"),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
+                            .testTag("provider_chip_azure")
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Microsoft Azure",
+                                fontWeight = if (isAzure) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isAzure) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
 
                     val isGemini = selectedProvider == UserProgressManager.VOICE_PROVIDER_GEMINI
-                    FilterChip(
-                        selected = isGemini,
+                    Surface(
                         onClick = {
                             selectedProvider = UserProgressManager.VOICE_PROVIDER_GEMINI
                             testResultSuccess = null
                             testResultError = null
                         },
-                        label = {
-                            Text(
-                                text = "Google Gemini",
-                                fontWeight = if (isGemini) FontWeight.Bold else FontWeight.Normal
-                            )
-                        },
+                        shape = RoundedCornerShape(10.dp),
+                        color = if (isGemini) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                        border = BorderStroke(
+                            width = if (isGemini) 1.5.dp else 1.dp,
+                            color = if (isGemini) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        ),
                         modifier = Modifier
                             .weight(1f)
-                            .testTag("provider_chip_gemini"),
-                        colors = FilterChipDefaults.filterChipColors(
-                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
-                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
-                        )
-                    )
+                            .testTag("provider_chip_gemini")
+                    ) {
+                        Box(
+                            modifier = Modifier.padding(vertical = 10.dp),
+                            contentAlignment = Alignment.Center
+                        ) {
+                            Text(
+                                text = "Google Gemini",
+                                fontWeight = if (isGemini) FontWeight.Bold else FontWeight.Medium,
+                                color = if (isGemini) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontSize = 13.sp
+                            )
+                        }
+                    }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
@@ -377,14 +392,15 @@ fun VoiceSettingsDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
+                            // Single Azure Speech Key label drawn once
                             Text(
-                                text = "تنظیمات سرویس Microsoft Azure Speech:",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "کلید اشتراک Azure Speech Key",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
                             // Azure Speech Key with show/hide
                             OutlinedTextField(
@@ -394,7 +410,6 @@ fun VoiceSettingsDialog(
                                     testResultSuccess = null
                                     testResultError = null
                                 },
-                                label = { Text("کلید اشتراک Azure Speech Key") },
                                 placeholder = { Text("مثال: 32 کاراکتر هگزادسیمال") },
                                 visualTransformation = if (isAzureKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {
@@ -416,7 +431,17 @@ fun VoiceSettingsDialog(
                                 singleLine = true
                             )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+
+                            // Single Azure Region label drawn once
+                            Text(
+                                text = "منطقه (Region)",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+
+                            Spacer(modifier = Modifier.height(4.dp))
 
                             // Azure Region
                             OutlinedTextField(
@@ -426,7 +451,6 @@ fun VoiceSettingsDialog(
                                     testResultSuccess = null
                                     testResultError = null
                                 },
-                                label = { Text("منطقه (Region)") },
                                 placeholder = { Text("eastus") },
                                 modifier = Modifier
                                     .fillMaxWidth()
@@ -527,14 +551,15 @@ fun VoiceSettingsDialog(
                         modifier = Modifier.fillMaxWidth()
                     ) {
                         Column(modifier = Modifier.padding(12.dp)) {
+                            // Single Gemini API Key label drawn once
                             Text(
-                                text = "تنظیمات سرویس Google Gemini:",
-                                style = MaterialTheme.typography.labelMedium,
+                                text = "کلید API جیمنای",
+                                style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.primary
+                                color = MaterialTheme.colorScheme.onSurface
                             )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                            Spacer(modifier = Modifier.height(4.dp))
 
                             // Gemini API key field with show/hide
                             OutlinedTextField(
@@ -544,7 +569,6 @@ fun VoiceSettingsDialog(
                                     testResultSuccess = null
                                     testResultError = null
                                 },
-                                label = { Text("کلید API جیمنای") },
                                 placeholder = { Text("AIzaSy...") },
                                 visualTransformation = if (isGeminiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
                                 trailingIcon = {

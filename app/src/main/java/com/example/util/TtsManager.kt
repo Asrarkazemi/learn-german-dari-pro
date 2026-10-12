@@ -19,6 +19,7 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.async
 import kotlinx.coroutines.cancel
 import kotlinx.coroutines.currentCoroutineContext
 import kotlinx.coroutines.delay
@@ -70,9 +71,9 @@ class TtsManager(
         private set
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(30, TimeUnit.SECONDS)
-        .readTimeout(30, TimeUnit.SECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
+        .connectTimeout(8, TimeUnit.SECONDS)
+        .readTimeout(10, TimeUnit.SECONDS)
+        .writeTimeout(10, TimeUnit.SECONDS)
         .build()
 
     private val coroutineScope = CoroutineScope(Dispatchers.Main + SupervisorJob())
@@ -569,28 +570,44 @@ class TtsManager(
         try {
             var playedOk = false
 
+            val germanFile: File?
+            val dariFile: File?
+
             // 1. If explicit offline file exists, play it directly!
             if (existingAudioFile != null && existingAudioFile.exists() && existingAudioFile.length() > 0) {
-                playedOk = playAudioFileAndWait(existingAudioFile, speed)
+                germanFile = existingAudioFile
+                dariFile = if (!dari.isNullOrBlank()) {
+                    synthesizeSegmentWithVoice(dari, isPersian = true, speed = speed, isMaleVoice = isSpeakerA)
+                } else null
             } else {
-                // Synthesize or retrieve from cache
-                val germanFile = synthesizeSegmentWithVoice(german, isPersian = false, speed = speed, isMaleVoice = isSpeakerA)
-                if (germanFile != null) {
-                    playedOk = playAudioFileAndWait(germanFile, speed)
-                } else {
-                    // Fallback to device TTS with Dari toast if no cloud voice is configured
-                    val hasAnyCloudKey = getEffectiveAzureKey().isNotEmpty() || getEffectiveApiKey().isNotEmpty()
-                    if (!hasAnyCloudKey) {
-                        showToast("کلید صوتی تنظیم نشده است؛ صدا از موتور گفتار گوشی پخش می‌شود.")
-                    }
-                    playedOk = speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
+                // Synthesize German and Dari IN PARALLEL where possible
+                val germanDeferred = async(Dispatchers.IO) {
+                    synthesizeSegmentWithVoice(german, isPersian = false, speed = speed, isMaleVoice = isSpeakerA)
                 }
+                val dariDeferred = if (!dari.isNullOrBlank()) {
+                    async(Dispatchers.IO) {
+                        synthesizeSegmentWithVoice(dari, isPersian = true, speed = speed, isMaleVoice = isSpeakerA)
+                    }
+                } else null
+
+                germanFile = germanDeferred.await()
+                dariFile = dariDeferred?.await()
+            }
+
+            if (germanFile != null) {
+                playedOk = playAudioFileAndWait(germanFile, speed)
+            } else {
+                // Fallback to device TTS with Dari toast if no cloud voice is configured
+                val hasAnyCloudKey = getEffectiveAzureKey().isNotEmpty() || getEffectiveApiKey().isNotEmpty()
+                if (!hasAnyCloudKey) {
+                    showToast("کلید صوتی تنظیم نشده است؛ صدا از موتور گفتار گوشی پخش می‌شود.")
+                }
+                playedOk = speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
             }
 
             // Play Dari translation
             if (!dari.isNullOrBlank() && currentCoroutineContext().isActive) {
                 delay(300)
-                val dariFile = synthesizeSegmentWithVoice(dari, isPersian = true, speed = speed, isMaleVoice = isSpeakerA)
                 if (dariFile != null) {
                     playAudioFileAndWait(dariFile, speed)
                 } else {
@@ -682,12 +699,33 @@ class TtsManager(
         coroutineScope.launch {
             _activeLoadingSentenceFlow.value = german
             try {
+                // Synthesize German and Dari IN PARALLEL where possible
+                val germanDeferred = async(Dispatchers.IO) {
+                    synthesizeSegment(german, isPersian = false, speed = speed)
+                }
+                val dariDeferred = if (!dari.isNullOrBlank()) {
+                    async(Dispatchers.IO) {
+                        synthesizeSegment(dari, isPersian = true, speed = speed)
+                    }
+                } else null
+
+                val germanFile = germanDeferred.await()
+                val dariFile = dariDeferred?.await()
+
                 if (german.isNotBlank()) {
-                    playSegmentAndWait(german, isPersian = false, speed = speed)
+                    if (germanFile != null) {
+                        playAudioFileAndWait(germanFile, speed)
+                    } else {
+                        speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
+                    }
                 }
                 if (!dari.isNullOrBlank() && isActive) {
                     delay(250)
-                    playSegmentAndWait(dari, isPersian = true, speed = speed)
+                    if (dariFile != null) {
+                        playAudioFileAndWait(dariFile, speed)
+                    } else {
+                        speakWithDeviceTtsAndWait(dari, isPersian = true, speed = speed)
+                    }
                 }
             } finally {
                 _activeLoadingSentenceFlow.value = null
@@ -727,12 +765,33 @@ class TtsManager(
         _activeLoadingSentenceFlow.value = german
         try {
             var ok = true
+            // Synthesize German and Dari IN PARALLEL where possible
+            val germanDeferred = async(Dispatchers.IO) {
+                synthesizeSegment(german, isPersian = false, speed = speed)
+            }
+            val dariDeferred = if (!dari.isNullOrBlank()) {
+                async(Dispatchers.IO) {
+                    synthesizeSegment(dari, isPersian = true, speed = speed)
+                }
+            } else null
+
+            val germanFile = germanDeferred.await()
+            val dariFile = dariDeferred?.await()
+
             if (german.isNotBlank()) {
-                ok = playSegmentAndWait(german, isPersian = false, speed = speed)
+                ok = if (germanFile != null) {
+                    playAudioFileAndWait(germanFile, speed)
+                } else {
+                    speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
+                }
             }
             if (!dari.isNullOrBlank() && currentCoroutineContext().isActive) {
                 delay(250)
-                playSegmentAndWait(dari, isPersian = true, speed = speed)
+                if (dariFile != null) {
+                    playAudioFileAndWait(dariFile, speed)
+                } else {
+                    speakWithDeviceTtsAndWait(dari, isPersian = true, speed = speed)
+                }
             }
             ok
         } finally {

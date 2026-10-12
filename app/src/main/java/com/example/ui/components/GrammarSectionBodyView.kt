@@ -92,8 +92,7 @@ fun GrammarSectionCard(
 
     Card(
         modifier = modifier
-            .fillMaxWidth()
-            .consumeTaps(),
+            .fillMaxWidth(),
         shape = RoundedCornerShape(20.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
         border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)),

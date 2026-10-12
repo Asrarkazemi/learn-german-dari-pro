@@ -20,9 +20,19 @@ data class ImmersiveUiState(
 val LocalImmersiveUiState = compositionLocalOf { ImmersiveUiState() }
 
 /**
- * Modifier to consume taps on interactive elements like cards/options/blanks so they
- * do not propagate to the background detectTapGestures and toggle immersive focus mode.
+ * Modifier to attach tap-to-toggle at the ROOT content container of detail screens:
+ * any tap NOT consumed by an interactive child (buttons, clickable chips, text fields)
+ * toggles the shared immersive state. Scrolling does NOT trigger or restore chrome.
  */
-fun Modifier.consumeTaps(): Modifier = this.pointerInput(Unit) {
-    detectTapGestures { /* consume tap */ }
+fun Modifier.immersiveTapToggle(immersiveState: ImmersiveUiState): Modifier = this.pointerInput(immersiveState) {
+    detectTapGestures(
+        onTap = {
+            immersiveState.toggleUiVisibility()
+        }
+    )
 }
+
+/**
+ * Modifier preserved for backwards compatibility where explicit tap consumption is needed.
+ */
+fun Modifier.consumeTaps(): Modifier = this

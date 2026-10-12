@@ -87,6 +87,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.IntOffset
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ArticleType
 import com.example.data.model.LessonData
@@ -94,6 +95,7 @@ import com.example.data.model.VocabularyItem
 import com.example.data.storage.UserProgressManager
 import com.example.ui.LocalImmersiveUiState
 import com.example.ui.consumeTaps
+import com.example.ui.immersiveTapToggle
 import com.example.ui.components.ArticleBadge
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
@@ -274,6 +276,7 @@ fun VocabularyScreen(
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f)
+                .immersiveTapToggle(immersiveState)
         ) {
             when (selectedSection) {
                 0 -> FlashcardsSection(
@@ -406,8 +409,7 @@ private fun FlashcardsSection(
 
                     Card(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .consumeTaps(),
+                            .fillMaxWidth(),
                         shape = RoundedCornerShape(16.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -768,23 +770,16 @@ private fun FullReadingSection(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
-                        immersiveState.toggleUiVisibility()
-                    }
-                )
-            }
+            .immersiveTapToggle(immersiveState)
             .testTag("full_reading_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // FIX O (4a & 3): Top Controls - Full-Text Audio & Step-by-Step Grammar Toggle
-        item {
+        item(key = "full_reading_top_controls_${currentLesson.id}") {
             Card(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .consumeTaps(),
+                    .fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(
                     containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f)
@@ -941,29 +936,43 @@ private fun FullReadingSection(
                     )
                 }
             } else {
-                // Default full scrolling list
-                item {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        modifier = Modifier.padding(bottom = 4.dp)
+                // Default full scrolling list with solid opaque header
+                item(key = "header_grammar_${currentLesson.id}") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .zIndex(5f)
                     ) {
-                        Icon(
-                            imageVector = Icons.Default.School,
-                            contentDescription = null,
-                            tint = MaterialTheme.colorScheme.primary,
-                            modifier = Modifier.size(24.dp)
-                        )
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text(
-                            text = "دستور زبان و نکات گرامری",
-                            style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold,
-                            color = MaterialTheme.colorScheme.primary
-                        )
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(24.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "دستور زبان و نکات گرامری",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
                     }
                 }
 
-                itemsIndexed(currentLesson.grammarSections) { index, grammarSection ->
+                itemsIndexed(
+                    items = currentLesson.grammarSections,
+                    key = { index, item -> "grammar_${currentLesson.id}_${index}_${item.title.hashCode()}" }
+                ) { index, grammarSection ->
                     GrammarSectionCard(
                         sectionNumber = index + 1,
                         title = grammarSection.title,
@@ -976,32 +985,45 @@ private fun FullReadingSection(
 
         // THEN: Example Sentences (numbered, one per row with audio buttons normal + slow)
         if (hasExamples) {
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            item(key = "header_examples_${currentLesson.id}") {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .zIndex(5f)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.secondary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "جملات نمونه (${currentLesson.exampleSentences.size} جمله)",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.secondary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.secondary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "جملات نمونه (${currentLesson.exampleSentences.size} جمله)",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.secondary
+                        )
+                    }
                 }
             }
 
-            itemsIndexed(currentLesson.exampleSentences) { index, sentence ->
+            itemsIndexed(
+                items = currentLesson.exampleSentences,
+                key = { index, item -> "example_${currentLesson.id}_${index}_${item.german.hashCode()}" }
+            ) { index, sentence ->
                 Card(
                     modifier = Modifier
-                        .fillMaxWidth()
-                        .consumeTaps(),
+                        .fillMaxWidth(),
                     shape = RoundedCornerShape(16.dp),
                     colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                     elevation = CardDefaults.cardElevation(defaultElevation = 1.dp)
@@ -1086,33 +1108,43 @@ private fun FullReadingSection(
 
         // THEN: Dialogues (line by line with speaker, German, pronunciation, meaning, and audio buttons)
         if (hasDialogues) {
-            item {
-                Row(
-                    verticalAlignment = Alignment.CenterVertically,
-                    modifier = Modifier.padding(top = 8.dp, bottom = 4.dp)
+            item(key = "header_dialogues_${currentLesson.id}") {
+                Surface(
+                    color = MaterialTheme.colorScheme.surface,
+                    tonalElevation = 2.dp,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .zIndex(5f)
                 ) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Filled.Chat,
-                        contentDescription = null,
-                        tint = MaterialTheme.colorScheme.tertiary,
-                        modifier = Modifier.size(24.dp)
-                    )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text(
-                        text = "مکالمه و گفتگوی درس",
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold,
-                        color = MaterialTheme.colorScheme.tertiary
-                    )
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(horizontal = 12.dp, vertical = 8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.Chat,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.tertiary,
+                            modifier = Modifier.size(24.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "مکالمه و گفتگوی درس",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.tertiary
+                        )
+                    }
                 }
             }
 
-            currentLesson.dialogues.forEach { dialogue ->
-                item {
+            currentLesson.dialogues.forEachIndexed { dlgIdx, dialogue ->
+                item(key = "dialogue_${currentLesson.id}_$dlgIdx") {
                     Card(
                         modifier = Modifier
-                            .fillMaxWidth()
-                            .consumeTaps(),
+                            .fillMaxWidth(),
                         shape = RoundedCornerShape(18.dp),
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                         elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -1231,43 +1263,50 @@ private fun QaPairsSection(
     LazyColumn(
         modifier = Modifier
             .fillMaxSize()
-            .pointerInput(Unit) {
-                detectTapGestures(
-                    onTap = {
-                        immersiveState.toggleUiVisibility()
-                    }
-                )
-            }
+            .immersiveTapToggle(immersiveState)
             .testTag("qa_pairs_list"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        item {
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                modifier = Modifier.padding(bottom = 2.dp)
+        item(key = "header_qa_${currentLesson.id}") {
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                tonalElevation = 2.dp,
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(5f)
             ) {
-                Icon(
-                    imageVector = Icons.Default.QuestionAnswer,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.primary,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "پرسش و پاسخ‌های کلیدی (${currentLesson.qaPairs.size} جفت)",
-                    style = MaterialTheme.typography.titleMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.primary
-                )
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 12.dp, vertical = 8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.QuestionAnswer,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "پرسش و پاسخ‌های کلیدی (${currentLesson.qaPairs.size} جفت)",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
             }
         }
 
-        itemsIndexed(currentLesson.qaPairs) { idx, qa ->
+        itemsIndexed(
+            items = currentLesson.qaPairs,
+            key = { idx, qa -> "qa_${currentLesson.id}_${idx}_${qa.questionGerman.hashCode()}" }
+        ) { idx, qa ->
             Card(
                 modifier = Modifier
-                    .fillMaxWidth()
-                    .consumeTaps(),
+                    .fillMaxWidth(),
                 shape = RoundedCornerShape(18.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
                 elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
@@ -1495,7 +1534,6 @@ private fun LessonExercisesTab(
             Card(
                 modifier = Modifier
                     .fillMaxWidth()
-                    .consumeTaps()
                     .padding(vertical = 24.dp),
                 shape = RoundedCornerShape(22.dp),
                 colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),

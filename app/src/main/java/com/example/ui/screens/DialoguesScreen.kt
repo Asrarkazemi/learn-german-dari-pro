@@ -52,7 +52,9 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.DialogueLineItem
 import com.example.data.model.LessonData
+import com.example.ui.LocalImmersiveUiState
 import com.example.ui.components.AudioSpeechButtons
+import com.example.ui.immersiveTapToggle
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.IndigoPrimary
 
@@ -99,35 +101,43 @@ fun DialoguesScreen(
 
     val safeIndex = selectedIndex.coerceIn(0, allDialogues.size - 1)
     val currentDialogue = allDialogues[safeIndex]
+    val immersiveState = LocalImmersiveUiState.current
 
     LazyColumn(
         modifier = modifier
             .fillMaxSize()
+            .immersiveTapToggle(immersiveState)
             .testTag("dialogues_screen"),
         contentPadding = PaddingValues(16.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
         // Carousel of Dialogues
         item {
-            Text(
-                text = "انتخاب مکالمه کاربردی:",
-                style = MaterialTheme.typography.labelLarge,
-                fontWeight = FontWeight.Bold,
-                color = MaterialTheme.colorScheme.onSurfaceVariant
-            )
-
-            Spacer(modifier = Modifier.height(8.dp))
-
-            LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                itemsIndexed(allDialogues) { index, entry ->
-                    FilterChip(
-                        selected = safeIndex == index,
-                        onClick = { selectedIndex = index },
-                        label = { Text(entry.lessonTitleDari) },
-                        leadingIcon = {
-                            Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
-                        }
+            AnimatedVisibility(visible = immersiveState.isUiVisible) {
+                Column {
+                    Text(
+                        text = "انتخاب مکالمه کاربردی:",
+                        style = MaterialTheme.typography.labelLarge,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        itemsIndexed(allDialogues) { index, entry ->
+                            FilterChip(
+                                selected = safeIndex == index,
+                                onClick = { selectedIndex = index },
+                                label = { Text(entry.lessonTitleDari) },
+                                leadingIcon = {
+                                    Icon(Icons.AutoMirrored.Filled.Chat, contentDescription = null, modifier = Modifier.size(16.dp))
+                                }
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(6.dp))
                 }
             }
         }

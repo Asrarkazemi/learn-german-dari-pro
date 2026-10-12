@@ -23,6 +23,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -38,6 +39,7 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.storage.UserProgressManager
 import com.example.util.TtsManager
+import kotlinx.coroutines.delay
 
 /**
  * FIX F (1): Replace the fixed normal/۰.۶x button pair with:
@@ -66,6 +68,16 @@ fun AudioSpeechButtons(
     val cleanSentence = remember(textToSpeak) { TtsManager.cleanGermanText(textToSpeak) }
     val isLoading = loadingSentence != null && loadingSentence == cleanSentence
 
+    var showLoadingHint by remember { mutableStateOf(false) }
+    LaunchedEffect(isLoading) {
+        if (isLoading) {
+            delay(3000)
+            showLoadingHint = true
+        } else {
+            showLoadingHint = false
+        }
+    }
+
     var expandedMenu by remember { mutableStateOf(false) }
 
     Row(
@@ -73,6 +85,16 @@ fun AudioSpeechButtons(
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.spacedBy(5.dp)
     ) {
+        if (isLoading && showLoadingHint) {
+            Text(
+                text = "در حال ساخت صدا…",
+                fontSize = 10.sp,
+                color = MaterialTheme.colorScheme.primary,
+                fontWeight = FontWeight.Medium,
+                modifier = Modifier.testTag("audio_loading_hint")
+            )
+        }
+
         // ONE Speaker button: plays at the currently chosen speed (shows spinner and disabled while loading)
         IconButton(
             onClick = {

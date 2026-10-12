@@ -136,6 +136,7 @@ fun MainScreen(
     var selectedLessonIdForPractice by remember { mutableStateOf("lesson_1") }
     var isNumbersScreenOpen by remember { mutableStateOf(false) }
     var showVoiceSettingsDialog by remember { mutableStateOf(false) }
+    var voiceSettingsInitialProvider by remember { mutableStateOf<String?>(null) }
 
     var isUiVisible by remember { mutableStateOf(true) }
     val immersiveUiState = remember(isUiVisible) {
@@ -403,7 +404,11 @@ fun MainScreen(
 
                         NavDestination.DIALOGUE_MAKER -> {
                             DialogueMakerScreen(
-                                ttsManager = ttsManager
+                                ttsManager = ttsManager,
+                                onOpenVoiceSettings = { focusGemini ->
+                                    voiceSettingsInitialProvider = if (focusGemini) com.example.data.storage.UserProgressManager.VOICE_PROVIDER_GEMINI else null
+                                    showVoiceSettingsDialog = true
+                                }
                             )
                         }
 
@@ -432,15 +437,20 @@ fun MainScreen(
         if (showVoiceSettingsDialog) {
             VoiceSettingsDialog(
                 currentKey = effectiveKey,
-                onDismiss = { showVoiceSettingsDialog = false },
+                onDismiss = {
+                    showVoiceSettingsDialog = false
+                    voiceSettingsInitialProvider = null
+                },
                 onSave = { newKey ->
                     progressManager.saveGeminiApiKey(newKey)
                     showVoiceSettingsDialog = false
+                    voiceSettingsInitialProvider = null
                 },
                 onTestVoice = { key, speed ->
                     ttsManager.testGeminiVoice(speed = speed, keyOverride = key)
                 },
-                ttsManager = ttsManager
+                ttsManager = ttsManager,
+                initialProvider = voiceSettingsInitialProvider
             )
         }
     }

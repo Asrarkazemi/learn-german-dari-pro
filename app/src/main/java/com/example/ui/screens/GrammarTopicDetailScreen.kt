@@ -73,9 +73,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.compose.ui.zIndex
 import com.example.data.model.GrammarTopic
 import com.example.ui.LocalImmersiveUiState
 import com.example.ui.consumeTaps
+import com.example.ui.immersiveTapToggle
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.GrammarSectionCard
@@ -111,75 +113,71 @@ fun GrammarTopicDetailScreen(
         LazyColumn(
             modifier = modifier
                 .fillMaxSize()
-                .pointerInput(Unit) {
-                    detectTapGestures(
-                        onTap = {
-                            immersiveState.toggleUiVisibility()
-                        }
-                    )
-                }
+                .immersiveTapToggle(immersiveState)
                 .testTag("grammar_detail_lazy_column"),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 48.dp),
+            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
             verticalArrangement = Arrangement.spacedBy(18.dp)
         ) {
                 // Topic Overview Header Banner
                 item {
-                    Card(
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .consumeTaps(),
-                        shape = RoundedCornerShape(20.dp),
-                        colors = CardDefaults.cardColors(
-                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                        )
-                    ) {
-                        Row(
+                    AnimatedVisibility(visible = immersiveState.isUiVisible) {
+                        Card(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .padding(16.dp),
-                            verticalAlignment = Alignment.CenterVertically
+                                .consumeTaps(),
+                            shape = RoundedCornerShape(20.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                            )
                         ) {
-                            Box(
+                            Row(
                                 modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primary),
-                                contentAlignment = Alignment.Center
+                                    .fillMaxWidth()
+                                    .padding(16.dp),
+                                verticalAlignment = Alignment.CenterVertically
                             ) {
-                                Text(
-                                    text = "${topic.number}",
-                                    color = MaterialTheme.colorScheme.onPrimary,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 19.sp
-                                )
-                            }
-                            Spacer(modifier = Modifier.width(14.dp))
-                            Column(modifier = Modifier.weight(1f)) {
-                                Text(
-                                    text = topic.titleDari,
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 17.sp,
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Box(
+                                    modifier = Modifier
+                                        .size(46.dp)
+                                        .clip(CircleShape)
+                                        .background(MaterialTheme.colorScheme.primary),
+                                    contentAlignment = Alignment.Center
+                                ) {
                                     Text(
-                                        text = topic.titleGerman,
-                                        fontSize = 13.5.sp,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold
+                                        text = "${topic.number}",
+                                        color = MaterialTheme.colorScheme.onPrimary,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 19.sp
                                     )
                                 }
-                            }
-                            IconButton(
-                                onClick = onBack,
-                                modifier = Modifier.testTag("btn_back_grammar_topic")
-                            ) {
-                                Icon(
-                                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                    contentDescription = "بازگشت",
-                                    tint = MaterialTheme.colorScheme.primary
-                                )
+                                Spacer(modifier = Modifier.width(14.dp))
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = topic.titleDari,
+                                        fontWeight = FontWeight.Bold,
+                                        fontSize = 17.sp,
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(2.dp))
+                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                        Text(
+                                            text = topic.titleGerman,
+                                            fontSize = 13.5.sp,
+                                            color = MaterialTheme.colorScheme.primary,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                                IconButton(
+                                    onClick = onBack,
+                                    modifier = Modifier.testTag("btn_back_grammar_topic")
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                        contentDescription = "بازگشت",
+                                        tint = MaterialTheme.colorScheme.primary
+                                    )
+                                }
                             }
                         }
                     }
@@ -234,53 +232,62 @@ fun GrammarTopicDetailScreen(
                 }
 
                 // Section 1: Explanation Sections with Step-by-Step Toggle
-                item {
-                    Row(
+                item(key = "header_grammar_sections_${topic.id}") {
+                    Surface(
+                        color = MaterialTheme.colorScheme.surface,
+                        tonalElevation = 2.dp,
                         modifier = Modifier
                             .fillMaxWidth()
-                            .padding(horizontal = 4.dp),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.CenterVertically
+                            .zIndex(5f),
+                        shape = RoundedCornerShape(14.dp)
                     ) {
-                        Row(verticalAlignment = Alignment.CenterVertically) {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Filled.MenuBook,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.primary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "توضیحات و قواعد گرامر",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
-                        }
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(horizontal = 12.dp, vertical = 8.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "توضیحات و قواعد گرامر",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
 
-                        if (topic.sections.size > 1) {
-                            Surface(
-                                shape = RoundedCornerShape(12.dp),
-                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
-                            ) {
-                                Row(
-                                    verticalAlignment = Alignment.CenterVertically,
-                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                            if (topic.sections.size > 1) {
+                                Surface(
+                                    shape = RoundedCornerShape(12.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
                                 ) {
-                                    Text(
-                                        text = "مرور قدم‌به‌قدم",
-                                        style = MaterialTheme.typography.labelSmall,
-                                        fontWeight = FontWeight.Bold,
-                                        color = if (isStepByStepMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
-                                    )
-                                    Spacer(modifier = Modifier.width(6.dp))
-                                    Switch(
-                                        checked = isStepByStepMode,
-                                        onCheckedChange = {
-                                            isStepByStepMode = it
-                                            currentStepIndex = 0
-                                        },
-                                        modifier = Modifier.scale(0.8f)
-                                    )
+                                    Row(
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    ) {
+                                        Text(
+                                            text = "مرور قدم‌به‌قدم",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            fontWeight = FontWeight.Bold,
+                                            color = if (isStepByStepMode) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                        Spacer(modifier = Modifier.width(6.dp))
+                                        Switch(
+                                            checked = isStepByStepMode,
+                                            onCheckedChange = {
+                                                isStepByStepMode = it
+                                                currentStepIndex = 0
+                                            },
+                                            modifier = Modifier.scale(0.8f)
+                                        )
+                                    }
                                 }
                             }
                         }
@@ -342,7 +349,7 @@ fun GrammarTopicDetailScreen(
                     }
                 } else {
                     // Render all explanation sections
-                    items(topic.sections.size, key = { "sec_$it" }) { index ->
+                    items(topic.sections.size, key = { "sec_${topic.id}_$it" }) { index ->
                         val section = topic.sections[index]
                         GrammarSectionCard(
                             sectionNumber = index + 1,
@@ -357,28 +364,38 @@ fun GrammarTopicDetailScreen(
 
                 // Section 2: Example Sentences (Numbered, Line-by-Line with Audio)
                 if (topic.exampleSentences.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(6.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                    item(key = "header_grammar_examples_${topic.id}") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(5f),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.RecordVoiceOver,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.secondary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "جملات نمونه و کاربردی (${topic.exampleSentences.size} جمله)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.RecordVoiceOver,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.secondary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "جملات نمونه و کاربردی (${topic.exampleSentences.size} جمله)",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
 
-                    items(topic.exampleSentences.size, key = { "ex_sent_$it" }) { index ->
+                    items(topic.exampleSentences.size, key = { "ex_sent_${topic.id}_$it" }) { index ->
                         val sentence = topic.exampleSentences[index]
                         Card(
                             modifier = Modifier
@@ -485,24 +502,34 @@ fun GrammarTopicDetailScreen(
 
                 // Section 3: Exercises in 4-option ✓/✗ format (ExactExerciseQuestionView)
                 if (topic.exercises.isNotEmpty()) {
-                    item {
-                        Spacer(modifier = Modifier.height(8.dp))
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 4.dp)
+                    item(key = "header_grammar_exercises_${topic.id}") {
+                        Surface(
+                            color = MaterialTheme.colorScheme.surface,
+                            tonalElevation = 2.dp,
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .zIndex(5f),
+                            shape = RoundedCornerShape(14.dp)
                         ) {
-                            Icon(
-                                imageVector = Icons.Default.FitnessCenter,
-                                contentDescription = null,
-                                tint = MaterialTheme.colorScheme.tertiary,
-                                modifier = Modifier.size(20.dp)
-                            )
-                            Spacer(modifier = Modifier.width(8.dp))
-                            Text(
-                                text = "تمرین‌های تثبیت گرامر (${topic.exercises.size} سوال)",
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                color = MaterialTheme.colorScheme.onBackground
-                            )
+                            Row(
+                                verticalAlignment = Alignment.CenterVertically,
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .padding(horizontal = 12.dp, vertical = 8.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.FitnessCenter,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.tertiary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "تمرین‌های تثبیت گرامر (${topic.exercises.size} سوال)",
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
                         }
                     }
 

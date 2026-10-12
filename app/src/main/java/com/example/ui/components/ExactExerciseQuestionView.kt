@@ -111,7 +111,6 @@ fun ExactExerciseQuestionView(
         Card(
             modifier = Modifier
                 .fillMaxWidth()
-                .consumeTaps()
                 .offset { IntOffset(shakeOffsetX.value.roundToInt(), 0) }
                 .testTag("exact_exercise_card"),
             shape = RoundedCornerShape(24.dp),
@@ -295,7 +294,7 @@ fun ExactExerciseQuestionView(
                                     if (isThisCorrect) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = "درست است! ✅",
+                                                text = "درست است!",
                                                 color = SuccessGreen,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp
@@ -313,7 +312,7 @@ fun ExactExerciseQuestionView(
                                     } else if (isThisSelected) {
                                         Row(verticalAlignment = Alignment.CenterVertically) {
                                             Text(
-                                                text = "اشتباه است ❌",
+                                                text = "اشتباه است",
                                                 color = ErrorRed,
                                                 fontWeight = FontWeight.Bold,
                                                 fontSize = 12.sp
@@ -334,7 +333,7 @@ fun ExactExerciseQuestionView(
                 }
 
                 // Dari Explanation Box
-                AnimatedVisibility(visible = isAnswered) {
+                if (isAnswered) {
                     Surface(
                         shape = RoundedCornerShape(14.dp),
                         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.7f),
@@ -368,7 +367,7 @@ fun ExactExerciseQuestionView(
     }
 
         // FIX B: Sticky/Prominent Action Bar ALWAYS VISIBLE when answered without scrolling
-        AnimatedVisibility(visible = isAnswered) {
+        if (isAnswered) {
             Surface(
                 shape = RoundedCornerShape(16.dp),
                 color = MaterialTheme.colorScheme.surface,

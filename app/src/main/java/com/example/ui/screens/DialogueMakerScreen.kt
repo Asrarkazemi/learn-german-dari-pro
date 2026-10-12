@@ -98,7 +98,8 @@ import java.util.UUID
 @Composable
 fun DialogueMakerScreen(
     ttsManager: TtsManager,
-    modifier: Modifier = Modifier
+    modifier: Modifier = Modifier,
+    onOpenVoiceSettings: ((focusGemini: Boolean) -> Unit)? = null
 ) {
     val context = LocalContext.current
     val coroutineScope = rememberCoroutineScope()
@@ -381,13 +382,42 @@ fun DialogueMakerScreen(
                     shape = RoundedCornerShape(12.dp),
                     colors = CardDefaults.cardColors(containerColor = ErrorRed.copy(alpha = 0.12f))
                 ) {
-                    Text(
-                        text = err,
-                        color = ErrorRed,
-                        fontSize = 13.sp,
-                        modifier = Modifier.padding(12.dp),
-                        fontWeight = FontWeight.Medium
-                    )
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = err,
+                            color = ErrorRed,
+                            fontSize = 13.sp,
+                            fontWeight = FontWeight.Medium
+                        )
+
+                        // If key is missing or key error: button to open voice settings directly at Gemini field
+                        if (progressManager.getEffectiveGeminiApiKey().isBlank() || err.contains("کلید") || err.contains("API")) {
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = {
+                                    onOpenVoiceSettings?.invoke(true)
+                                },
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("btn_enter_gemini_key"),
+                                colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                                shape = RoundedCornerShape(10.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.AutoAwesome,
+                                    contentDescription = null,
+                                    modifier = Modifier.size(16.dp)
+                                )
+                                Spacer(modifier = Modifier.width(6.dp))
+                                Text(
+                                    text = "وارد کردن کلید جیمنای",
+                                    fontWeight = FontWeight.Bold,
+                                    fontSize = 13.sp,
+                                    color = Color.White
+                                )
+                            }
+                        }
+                    }
                 }
             }
         }

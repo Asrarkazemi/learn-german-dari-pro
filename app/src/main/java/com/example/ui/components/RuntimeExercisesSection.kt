@@ -127,7 +127,6 @@ fun RuntimeExercisesSection(
     Card(
         modifier = modifier
             .fillMaxWidth()
-            .consumeTaps()
             .testTag("runtime_exercises_container"),
         shape = RoundedCornerShape(22.dp),
         colors = CardDefaults.cardColors(
