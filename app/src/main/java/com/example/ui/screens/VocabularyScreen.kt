@@ -162,34 +162,40 @@ fun VocabularyScreen(
             enter = slideInVertically(initialOffsetY = { -it }),
             exit = slideOutVertically(targetOffsetY = { -it })
         ) {
-            Column(modifier = Modifier.fillMaxWidth()) {
-                // Dynamic Lesson Selector Tabs
-                ScrollableTabRow(
-                    selectedTabIndex = lessonIndex,
-                    edgePadding = 12.dp,
-                    modifier = Modifier.fillMaxWidth()
-                ) {
-                    allLessons.forEach { lesson ->
-                        Tab(
-                            selected = selectedLessonId == lesson.id,
-                            onClick = {
-                                selectedLessonId = lesson.id
-                            },
-                            text = {
-                                Text(
-                                    text = "درس ${lesson.number}",
-                                    fontWeight = if (selectedLessonId == lesson.id) FontWeight.Bold else FontWeight.Normal
-                                )
-                            }
-                        )
+            Surface(
+                color = MaterialTheme.colorScheme.surface,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .zIndex(10f)
+            ) {
+                Column(modifier = Modifier.fillMaxWidth()) {
+                    // Dynamic Lesson Selector Tabs
+                    ScrollableTabRow(
+                        selectedTabIndex = lessonIndex,
+                        edgePadding = 12.dp,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        allLessons.forEach { lesson ->
+                            Tab(
+                                selected = selectedLessonId == lesson.id,
+                                onClick = {
+                                    selectedLessonId = lesson.id
+                                },
+                                text = {
+                                    Text(
+                                        text = "درس ${lesson.number}",
+                                        fontWeight = if (selectedLessonId == lesson.id) FontWeight.Bold else FontWeight.Normal
+                                    )
+                                }
+                            )
+                        }
                     }
-                }
 
-                // Subheader: Lesson Title
-                Surface(
-                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                    modifier = Modifier.fillMaxWidth()
-                ) {
+                    // Subheader: Lesson Title
+                    Surface(
+                        color = MaterialTheme.colorScheme.surfaceVariant,
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
                     Column(
                         modifier = Modifier
                             .fillMaxWidth()
@@ -270,6 +276,7 @@ fun VocabularyScreen(
                 }
             }
         }
+    }
 
         // Content of the active section
         Box(

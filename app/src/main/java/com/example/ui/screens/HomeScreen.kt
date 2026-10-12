@@ -124,7 +124,7 @@ fun HomeScreen(
         modifier = modifier
             .fillMaxSize()
             .testTag("home_screen_lazy_column"),
-        contentPadding = PaddingValues(16.dp),
+        contentPadding = PaddingValues(start = 16.dp, top = 16.dp, end = 16.dp, bottom = 80.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         // FIX O (1b): Learning-Streak Counter with 🔥 icon at the TOP of the Home Screen
