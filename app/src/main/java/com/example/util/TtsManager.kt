@@ -71,7 +71,7 @@ class TtsManager(
         private set
 
     private val httpClient = OkHttpClient.Builder()
-        .connectTimeout(8, TimeUnit.SECONDS)
+        .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
         .writeTimeout(10, TimeUnit.SECONDS)
         .build()
@@ -354,26 +354,34 @@ class TtsManager(
             .post(requestBody)
             .build()
 
-        try {
-            UserProgressManager.getInstance(applicationContext).incrementDailyAzureRequestsCount()
-            val response = httpClient.newCall(request).execute()
-            val code = response.code
-            val bodyBytes = response.body?.bytes()
+        val maxAttempts = 2
+        for (attempt in 1..maxAttempts) {
+            try {
+                UserProgressManager.getInstance(applicationContext).incrementDailyAzureRequestsCount()
+                val response = httpClient.newCall(request).execute()
+                val code = response.code
+                val bodyBytes = response.body?.bytes()
 
-            if (response.isSuccessful && bodyBytes != null && bodyBytes.isNotEmpty()) {
-                val key = getVoiceLibraryKey(clean, voiceName, PROVIDER_AZURE)
-                val libraryFile = File(voiceLibraryDir, "$key.mp3")
-                libraryFile.outputStream().use { it.write(bodyBytes) }
-                Log.d("TtsManager", "Saved Azure audio to voice library: ${libraryFile.name} (${libraryFile.length()} bytes)")
-                return@withContext libraryFile
-            } else {
-                Log.w("TtsManager", "Azure TTS synthesis failed with code $code: ${response.message}")
-                return@withContext null
+                if (response.isSuccessful && bodyBytes != null && bodyBytes.isNotEmpty()) {
+                    val key = getVoiceLibraryKey(clean, voiceName, PROVIDER_AZURE)
+                    val libraryFile = File(voiceLibraryDir, "$key.mp3")
+                    libraryFile.outputStream().use { it.write(bodyBytes) }
+                    Log.d("TtsManager", "Saved Azure audio to voice library: ${libraryFile.name} (${libraryFile.length()} bytes)")
+                    return@withContext libraryFile
+                } else {
+                    Log.w("TtsManager", "Azure TTS synthesis attempt $attempt failed with code $code: ${response.message}")
+                    if (attempt == maxAttempts) {
+                        return@withContext null
+                    }
+                }
+            } catch (e: Exception) {
+                Log.e("TtsManager", "Azure TTS synthesis attempt $attempt error: ${e.message}", e)
+                if (attempt == maxAttempts) {
+                    return@withContext null
+                }
             }
-        } catch (e: Exception) {
-            Log.e("TtsManager", "Azure TTS synthesis error: ${e.message}", e)
-            return@withContext null
         }
+        return@withContext null
     }
 
     /**
@@ -607,7 +615,7 @@ class TtsManager(
 
             // Play Dari translation
             if (!dari.isNullOrBlank() && currentCoroutineContext().isActive) {
-                delay(300)
+                delay(120)
                 if (dariFile != null) {
                     playAudioFileAndWait(dariFile, speed)
                 } else {
@@ -720,7 +728,7 @@ class TtsManager(
                     }
                 }
                 if (!dari.isNullOrBlank() && isActive) {
-                    delay(250)
+                    delay(120)
                     if (dariFile != null) {
                         playAudioFileAndWait(dariFile, speed)
                     } else {
@@ -786,7 +794,7 @@ class TtsManager(
                 }
             }
             if (!dari.isNullOrBlank() && currentCoroutineContext().isActive) {
-                delay(250)
+                delay(120)
                 if (dariFile != null) {
                     playAudioFileAndWait(dariFile, speed)
                 } else {
@@ -847,7 +855,7 @@ class TtsManager(
 
                 playAudioFileAndWait(germanFile, speed)
                 if (dariFile != null) {
-                    delay(250)
+                    delay(120)
                     playAudioFileAndWait(dariFile, speed)
                 }
 
@@ -882,7 +890,7 @@ class TtsManager(
 
                 playAudioFileAndWait(germanFile, speed)
                 if (dariFile != null) {
-                    delay(250)
+                    delay(120)
                     playAudioFileAndWait(dariFile, speed)
                 }
 
