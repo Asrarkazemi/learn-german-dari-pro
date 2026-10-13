@@ -224,15 +224,15 @@ fun DialogueMakerScreen(
     }
 
     fun startGenerating() {
-        val topic = topicInput.trim()
-        if (topic.isBlank()) {
-            Toast.makeText(context, "لطفاً موضوع مکالمه را وارد کنید.", Toast.LENGTH_SHORT).show()
-            return
-        }
-
         val key = progressManager.getEffectiveGeminiApiKey().trim()
         if (key.isBlank()) {
             errorMessage = "کلید API جیمنای تنظیم نشده است. لطفاً ابتدا کلید خود را از بخش تنظیمات وارد نمایید."
+            return
+        }
+
+        val topic = topicInput.trim()
+        if (topic.isBlank()) {
+            Toast.makeText(context, "لطفاً موضوع مکالمه را وارد کنید.", Toast.LENGTH_SHORT).show()
             return
         }
 
@@ -367,6 +367,51 @@ fun DialogueMakerScreen(
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("ساخت مکالمه", fontWeight = FontWeight.Bold)
+                    }
+                }
+            }
+        }
+
+        // When NO Gemini API key is saved, show clear prompt and button to enter key
+        if (progressManager.getEffectiveGeminiApiKey().isBlank() && errorMessage == null) {
+            Card(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(top = 10.dp)
+                    .testTag("card_gemini_key_prompt"),
+                shape = RoundedCornerShape(12.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+            ) {
+                Column(modifier = Modifier.padding(12.dp)) {
+                    Text(
+                        text = "برای ساخت مکالمه توسط هوش مصنوعی، لطفاً ابتدا کلید API جیمنای خود را وارد نمایید:",
+                        color = MaterialTheme.colorScheme.onSurface,
+                        fontSize = 12.5.sp,
+                        fontWeight = FontWeight.Medium
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Button(
+                        onClick = {
+                            onOpenVoiceSettings?.invoke(true)
+                        },
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("btn_enter_gemini_key_prompt"),
+                        colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary),
+                        shape = RoundedCornerShape(10.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AutoAwesome,
+                            contentDescription = null,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text(
+                            text = "وارد کردن کلید جیمنای",
+                            fontWeight = FontWeight.Bold,
+                            fontSize = 13.sp,
+                            color = Color.White
+                        )
                     }
                 }
             }
