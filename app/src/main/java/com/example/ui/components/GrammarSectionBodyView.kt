@@ -693,6 +693,8 @@ private fun renderTableRowWithPipe(
  * Checks if a line is a subheading inside a grammar section.
  */
 private fun isSubheadingLine(line: String): Boolean {
+    if (line.contains("⟦") || line.contains("⟧")) return false
+
     val trimmed = line.trim()
     if (trimmed.startsWith("###") || trimmed.startsWith("##") || trimmed.startsWith("**")) return true
     if (trimmed.startsWith("• فعل ") || trimmed.startsWith("• صرف ") ||
@@ -714,6 +716,8 @@ private fun isSubheadingLine(line: String): Boolean {
         trimmed.startsWith("۳.") || trimmed.startsWith("3.") ||
         trimmed.startsWith("۴.") || trimmed.startsWith("4.")) && trimmed.length <= 60
     ) {
+        val textAfterNumber = trimmed.substring(2).trim()
+        if (isMainlyLatin(textAfterNumber)) return false
         return !trimmed.endsWith(".") || trimmed.count { it == '.' } == 1
     }
 
