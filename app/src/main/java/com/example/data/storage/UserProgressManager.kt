@@ -6,9 +6,22 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
+data class ReadingPosition(
+    val libraryId: String,
+    val itemNumber: Int,
+    val itemId: String = "",
+    val currentTab: String = "",
+    val currentSectionIndex: Int = 0,
+    val displayTitle: String = ""
+)
+
 class UserProgressManager(context: Context) {
 
-    private val prefs: SharedPreferences = context.getSharedPreferences("german_learning_prefs", Context.MODE_PRIVATE)
+    val appContext: Context = context.applicationContext
+    private val prefs: SharedPreferences = appContext.getSharedPreferences("german_learning_prefs", Context.MODE_PRIVATE)
+
+    private val _savedReadingPositionFlow = MutableStateFlow<ReadingPosition?>(null)
+    val savedReadingPositionFlow: StateFlow<ReadingPosition?> = _savedReadingPositionFlow.asStateFlow()
 
     private val _learnedWordsFlow = MutableStateFlow<Set<String>>(emptySet())
     val learnedWordsFlow: StateFlow<Set<String>> = _learnedWordsFlow.asStateFlow()
@@ -74,6 +87,30 @@ class UserProgressManager(context: Context) {
         val studyDays = prefs.getStringSet(KEY_STUDY_DAYS, emptySet()) ?: emptySet()
         _studyDaysFlow.value = studyDays
         _studyStreakFlow.value = calculateStreak(studyDays)
+
+        val hasSavedReading = prefs.getBoolean(KEY_READING_HAS_SAVED, false)
+        if (hasSavedReading) {
+            val libId = prefs.getString(KEY_READING_LIBRARY_ID, "") ?: ""
+            val itemNum = prefs.getInt(KEY_READING_ITEM_NUMBER, 1)
+            val itemId = prefs.getString(KEY_READING_ITEM_ID, "") ?: ""
+            val tab = prefs.getString(KEY_READING_CURRENT_TAB, "") ?: ""
+            val secIdx = prefs.getInt(KEY_READING_SECTION_INDEX, 0)
+            val title = prefs.getString(KEY_READING_DISPLAY_TITLE, "") ?: ""
+            if (libId.isNotEmpty() && title.isNotEmpty()) {
+                _savedReadingPositionFlow.value = ReadingPosition(
+                    libraryId = libId,
+                    itemNumber = itemNum,
+                    itemId = itemId,
+                    currentTab = tab,
+                    currentSectionIndex = secIdx,
+                    displayTitle = title
+                )
+            } else {
+                _savedReadingPositionFlow.value = null
+            }
+        } else {
+            _savedReadingPositionFlow.value = null
+        }
     }
 
     fun getVoiceProvider(): String = _voiceProviderFlow.value
@@ -380,6 +417,51 @@ class UserProgressManager(context: Context) {
         _quizzesTakenCountFlow.value = newCount
     }
 
+    fun saveReadingPosition(
+        libraryId: String,
+        itemNumber: Int,
+        itemId: String = "",
+        currentTab: String = "",
+        currentSectionIndex: Int = 0,
+        displayTitle: String
+    ) {
+        val trimmedTitle = displayTitle.trim()
+        prefs.edit()
+            .putBoolean(KEY_READING_HAS_SAVED, true)
+            .putString(KEY_READING_LIBRARY_ID, libraryId)
+            .putInt(KEY_READING_ITEM_NUMBER, itemNumber)
+            .putString(KEY_READING_ITEM_ID, itemId)
+            .putString(KEY_READING_CURRENT_TAB, currentTab)
+            .putInt(KEY_READING_SECTION_INDEX, currentSectionIndex)
+            .putString(KEY_READING_DISPLAY_TITLE, trimmedTitle)
+            .commit()
+
+        _savedReadingPositionFlow.value = ReadingPosition(
+            libraryId = libraryId,
+            itemNumber = itemNumber,
+            itemId = itemId,
+            currentTab = currentTab,
+            currentSectionIndex = currentSectionIndex,
+            displayTitle = trimmedTitle
+        )
+    }
+
+    fun clearReadingPosition() {
+        prefs.edit()
+            .putBoolean(KEY_READING_HAS_SAVED, false)
+            .remove(KEY_READING_LIBRARY_ID)
+            .remove(KEY_READING_ITEM_NUMBER)
+            .remove(KEY_READING_ITEM_ID)
+            .remove(KEY_READING_CURRENT_TAB)
+            .remove(KEY_READING_SECTION_INDEX)
+            .remove(KEY_READING_DISPLAY_TITLE)
+            .commit()
+
+        _savedReadingPositionFlow.value = null
+    }
+
+    fun getSavedReadingPosition(): ReadingPosition? = _savedReadingPositionFlow.value
+
     fun resetAllProgress() {
         prefs.edit().clear().apply()
         _learnedWordsFlow.value = emptySet()
@@ -387,9 +469,22 @@ class UserProgressManager(context: Context) {
         _quizzesTakenCountFlow.value = 0
         _studyDaysFlow.value = emptySet()
         _studyStreakFlow.value = 0
+        _savedReadingPositionFlow.value = null
     }
 
     companion object {
+        const val LIBRARY_LESSONS = "LESSONS"
+        const val LIBRARY_GRAMMAR = "GRAMMAR"
+        const val LIBRARY_GRAMMAR_BOOK = "GRAMMAR_BOOK"
+
+        private const val KEY_READING_HAS_SAVED = "reading_has_saved"
+        private const val KEY_READING_LIBRARY_ID = "reading_library_id"
+        private const val KEY_READING_ITEM_NUMBER = "reading_item_number"
+        private const val KEY_READING_ITEM_ID = "reading_item_id"
+        private const val KEY_READING_CURRENT_TAB = "reading_current_tab"
+        private const val KEY_READING_SECTION_INDEX = "reading_section_index"
+        private const val KEY_READING_DISPLAY_TITLE = "reading_display_title"
+
         private const val KEY_LEARNED_WORDS = "learned_words"
         private const val KEY_QUIZ_HIGH_SCORE = "quiz_high_score"
         private const val KEY_QUIZZES_TAKEN_COUNT = "quizzes_taken_count"
@@ -441,9 +536,23 @@ class UserProgressManager(context: Context) {
         private var instance: UserProgressManager? = null
 
         fun getInstance(context: Context): UserProgressManager {
-            return instance ?: synchronized(this) {
-                instance ?: UserProgressManager(context.applicationContext).also { instance = it }
+            val appCtx = context.applicationContext
+            val current = instance
+            if (current != null && current.appContext === appCtx) {
+                return current
             }
+            return synchronized(this) {
+                val inst = instance
+                if (inst != null && inst.appContext === appCtx) {
+                    inst
+                } else {
+                    UserProgressManager(appCtx).also { instance = it }
+                }
+            }
+        }
+
+        fun resetInstanceForTesting() {
+            instance = null
         }
     }
 }

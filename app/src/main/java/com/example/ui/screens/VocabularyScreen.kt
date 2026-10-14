@@ -122,6 +122,7 @@ fun VocabularyScreen(
     onPlayAudio: (String, Boolean) -> Unit, // text, isSlow
     initialSection: Int = 0,
     ttsManager: com.example.util.TtsManager? = null,
+    isGrammarBook: Boolean = false,
     modifier: Modifier = Modifier
 ) {
     if (allLessons.isEmpty()) {
@@ -138,13 +139,38 @@ fun VocabularyScreen(
 
     val context = LocalContext.current
     val progressManager = remember { UserProgressManager.getInstance(context) }
-    LaunchedEffect(selectedLessonId) {
-        progressManager.recordStudyDay()
-    }
 
     // 4 sections: 0: «فلشکارتها», 1: «متن کامل درس», 2: «پرسش و پاسخ», 3: «تمرینها»
     var selectedSection by remember(selectedLessonId, initialSection) {
         mutableIntStateOf(initialSection.coerceIn(0, 3))
+    }
+
+    LaunchedEffect(selectedLessonId, selectedSection, isGrammarBook) {
+        progressManager.recordStudyDay()
+        val lesson = allLessons.find { it.id == selectedLessonId } ?: allLessons.firstOrNull()
+        if (lesson != null) {
+            val sectionTabName = when (selectedSection) {
+                0 -> "فلشکارتها"
+                1 -> "متن کامل درس"
+                2 -> "پرسش و پاسخ"
+                3 -> "تمرینها"
+                else -> "بخش $selectedSection"
+            }
+            val libId = if (isGrammarBook) UserProgressManager.LIBRARY_GRAMMAR_BOOK else UserProgressManager.LIBRARY_LESSONS
+            val title = if (isGrammarBook) {
+                "کتاب گرامر: درس ${lesson.number} - ${lesson.titleDari}"
+            } else {
+                "درس ${lesson.number}: ${lesson.titleDari}"
+            }
+            progressManager.saveReadingPosition(
+                libraryId = libId,
+                itemNumber = lesson.number,
+                itemId = lesson.id,
+                currentTab = sectionTabName,
+                currentSectionIndex = selectedSection,
+                displayTitle = title
+            )
+        }
     }
 
     val currentLesson: LessonData = allLessons.find { it.id == selectedLessonId } ?: allLessons.first()

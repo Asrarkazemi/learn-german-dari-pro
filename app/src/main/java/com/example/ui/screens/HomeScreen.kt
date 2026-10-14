@@ -25,7 +25,9 @@ import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.Calculate
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
+import com.example.data.storage.ReadingPosition
 import androidx.compose.material.icons.filled.EmojiEvents
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.PlayArrow
@@ -100,6 +102,7 @@ fun HomeScreen(
     onDeleteCustomLesson: (String) -> Unit,
     onDeleteGrammarBookLesson: (String) -> Unit = {},
     onNavigateToGrammar: () -> Unit = {},
+    onContinueReading: (ReadingPosition) -> Unit = {},
     initialLibraryTab: HomeLibraryTab = HomeLibraryTab.LESSONS,
     modifier: Modifier = Modifier
 ) {
@@ -107,6 +110,7 @@ fun HomeScreen(
     val progressManager = remember { UserProgressManager.getInstance(context) }
     val studyStreak by progressManager.studyStreakFlow.collectAsState()
     val isStudiedToday = progressManager.isTodayStudied()
+    val savedReadingPosition by progressManager.savedReadingPositionFlow.collectAsState()
 
     var selectedLibraryTab by remember(initialLibraryTab) { mutableStateOf(initialLibraryTab) }
     var showImportCourseDialog by remember { mutableStateOf(false) }
@@ -133,6 +137,17 @@ fun HomeScreen(
                 streak = studyStreak,
                 isStudiedToday = isStudiedToday
             )
+        }
+
+        // Continue Reading Card («ادامهٔ مطالعه»)
+        savedReadingPosition?.let { position ->
+            item {
+                ContinueReadingCard(
+                    position = position,
+                    onContinue = { onContinueReading(position) },
+                    onDismiss = { progressManager.clearReadingPosition() }
+                )
+            }
         }
 
         // Welcome Banner (Main Course) OR Grammar Book Banner
@@ -1120,6 +1135,134 @@ private fun StreakBanner(
                         color = if (streak > 0) Color(0xFF9A3412) else MaterialTheme.colorScheme.onSurfaceVariant
                     )
                 }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ContinueReadingCard(
+    position: ReadingPosition,
+    onContinue: () -> Unit,
+    onDismiss: () -> Unit,
+    modifier: Modifier = Modifier
+) {
+    Card(
+        modifier = modifier
+            .fillMaxWidth()
+            .testTag("continue_reading_card"),
+        shape = RoundedCornerShape(22.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+        ),
+        border = BorderStroke(1.dp, MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)),
+        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+    ) {
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(16.dp)
+        ) {
+            // Header: Icon + Title «ادامهٔ مطالعه» + Dismiss button ✕
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Filled.MenuBook,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.onPrimary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.width(10.dp))
+
+                    Text(
+                        text = "ادامهٔ مطالعه",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+
+                // Small ✕ dismiss button that clears the saved position
+                IconButton(
+                    onClick = onDismiss,
+                    modifier = Modifier
+                        .size(32.dp)
+                        .testTag("btn_dismiss_continue_reading")
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Close,
+                        contentDescription = "بستن",
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(10.dp))
+
+            // Display Title
+            Text(
+                text = position.displayTitle,
+                style = MaterialTheme.typography.bodyLarge.copy(fontWeight = FontWeight.Bold),
+                color = MaterialTheme.colorScheme.onSurface
+            )
+
+            if (position.currentTab.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.7f)
+                ) {
+                    Text(
+                        text = "بخش: ${position.currentTab}",
+                        fontSize = 11.5.sp,
+                        fontWeight = FontWeight.Medium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 3.dp)
+                    )
+                }
+            }
+
+            Spacer(modifier = Modifier.height(14.dp))
+
+            // Action Button «ادامه از همانجا»
+            Button(
+                onClick = onContinue,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .height(44.dp)
+                    .testTag("btn_continue_reading"),
+                shape = RoundedCornerShape(12.dp),
+                colors = ButtonDefaults.buttonColors(
+                    containerColor = MaterialTheme.colorScheme.primary
+                )
+            ) {
+                Icon(
+                    imageVector = Icons.Default.PlayArrow,
+                    contentDescription = null,
+                    modifier = Modifier.size(18.dp)
+                )
+                Spacer(modifier = Modifier.width(6.dp))
+                Text(
+                    text = "ادامه از همانجا",
+                    fontWeight = FontWeight.Bold,
+                    fontSize = 13.5.sp
+                )
             }
         }
     }

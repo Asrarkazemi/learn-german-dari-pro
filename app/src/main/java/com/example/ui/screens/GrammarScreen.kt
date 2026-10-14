@@ -72,6 +72,7 @@ fun GrammarScreen(
     ttsManager: com.example.util.TtsManager? = null,
     selectedTopicId: String? = null,
     onTopicSelected: ((String?) -> Unit)? = null,
+    initialSectionIndex: Int = 0,
     modifier: Modifier = Modifier
 ) {
     val context = LocalContext.current
@@ -96,7 +97,8 @@ fun GrammarScreen(
                 }
             },
             onPlayAudio = onPlayAudio,
-            ttsManager = ttsManager
+            ttsManager = ttsManager,
+            initialSectionIndex = initialSectionIndex
         )
         return
     }

@@ -141,6 +141,8 @@ fun MainScreen(
     var selectedLessonSection by remember { mutableIntStateOf(0) }
     var selectedLessonIdForPractice by remember { mutableStateOf("lesson_1") }
     var isNumbersScreenOpen by remember { mutableStateOf(false) }
+    var selectedTopicIdForGrammar by remember { mutableStateOf<String?>(null) }
+    var selectedGrammarSectionIndex by remember { mutableIntStateOf(0) }
     var showVoiceSettingsDialog by remember { mutableStateOf(false) }
     var voiceSettingsInitialProvider by remember { mutableStateOf<String?>(null) }
 
@@ -182,6 +184,11 @@ fun MainScreen(
         if (isNumbersScreenOpen) {
             BackHandler {
                 isNumbersScreenOpen = false
+                isUiVisible = true
+            }
+        } else if (currentTab == NavDestination.GRAMMAR && selectedTopicIdForGrammar != null) {
+            BackHandler {
+                selectedTopicIdForGrammar = null
                 isUiVisible = true
             }
         } else if (currentTab != NavDestination.HOME) {
@@ -356,7 +363,46 @@ fun MainScreen(
                                 onImportGrammarBookJson = { json -> grammarBookRepository.importJson(json) },
                                 onDeleteCustomLesson = { lessonId -> courseRepository.deleteCustomLesson(lessonId) },
                                 onDeleteGrammarBookLesson = { lessonId -> grammarBookRepository.deleteLesson(lessonId) },
-                                onNavigateToGrammar = { currentTab = NavDestination.GRAMMAR }
+                                onNavigateToGrammar = { currentTab = NavDestination.GRAMMAR },
+                                onContinueReading = { position ->
+                                    isNumbersScreenOpen = false
+                                    isUiVisible = true
+                                    val lib = position.libraryId.uppercase()
+                                    when {
+                                        lib == com.example.data.storage.UserProgressManager.LIBRARY_LESSONS || lib == "LESSONS" || lib == "LESSON" -> {
+                                            val lesson = allLessons.find { (position.itemId.isNotBlank() && it.id == position.itemId) || it.number == position.itemNumber }
+                                                ?: allLessons.find { it.number == position.itemNumber }
+                                                ?: allLessons.firstOrNull()
+                                            if (lesson != null) {
+                                                selectedLessonIdForVocab = lesson.id
+                                                selectedLessonSection = position.currentSectionIndex.coerceIn(0, 3)
+                                                activeLessonIsGrammarBook = false
+                                                currentTab = NavDestination.VOCABULARY
+                                            }
+                                        }
+                                        lib == com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR_BOOK || lib == "GRAMMAR_BOOK" || lib == "BOOK" -> {
+                                            val lesson = grammarBookLessons.find { (position.itemId.isNotBlank() && it.id == position.itemId) || it.number == position.itemNumber }
+                                                ?: grammarBookLessons.find { it.number == position.itemNumber }
+                                                ?: grammarBookLessons.firstOrNull()
+                                            if (lesson != null) {
+                                                selectedLessonIdForVocab = lesson.id
+                                                selectedLessonSection = position.currentSectionIndex.coerceIn(0, 3)
+                                                activeLessonIsGrammarBook = true
+                                                currentTab = NavDestination.VOCABULARY
+                                            }
+                                        }
+                                        lib == com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR || lib == "GRAMMAR" -> {
+                                            val topic = allGrammarTopics.find { (position.itemId.isNotBlank() && it.id == position.itemId) || it.number == position.itemNumber }
+                                                ?: allGrammarTopics.find { it.number == position.itemNumber }
+                                                ?: allGrammarTopics.firstOrNull()
+                                            if (topic != null) {
+                                                selectedTopicIdForGrammar = topic.id
+                                                selectedGrammarSectionIndex = position.currentSectionIndex
+                                                currentTab = NavDestination.GRAMMAR
+                                            }
+                                        }
+                                    }
+                                }
                             )
                         }
 
@@ -368,7 +414,10 @@ fun MainScreen(
                                 onDeleteCustomTopic = { topicId -> grammarRepository.deleteCustomTopic(topicId) },
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
                                 onNavigateToLessons = { currentTab = NavDestination.HOME },
-                                ttsManager = ttsManager
+                                ttsManager = ttsManager,
+                                selectedTopicId = selectedTopicIdForGrammar,
+                                onTopicSelected = { selectedTopicIdForGrammar = it },
+                                initialSectionIndex = selectedGrammarSectionIndex
                             )
                         }
 
@@ -387,7 +436,8 @@ fun MainScreen(
                                 },
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
                                 initialSection = selectedLessonSection,
-                                ttsManager = ttsManager
+                                ttsManager = ttsManager,
+                                isGrammarBook = activeLessonIsGrammarBook
                             )
                         }
 

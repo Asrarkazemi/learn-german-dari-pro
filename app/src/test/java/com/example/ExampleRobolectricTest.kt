@@ -1107,5 +1107,83 @@ class ExampleRobolectricTest {
         tempAudio0.delete()
         tempAudio1.delete()
     }
+
+    @Test
+    fun `verify continue reading position persists and updates correctly across all three libraries`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+        val progressManager = com.example.data.storage.UserProgressManager.getInstance(context)
+
+        // Clear any leftover state
+        progressManager.clearReadingPosition()
+        org.junit.Assert.assertNull(progressManager.getSavedReadingPosition())
+        org.junit.Assert.assertNull(progressManager.savedReadingPositionFlow.value)
+
+        // 1. Save reading position for Lessons (درس‌ها)
+        progressManager.saveReadingPosition(
+            libraryId = com.example.data.storage.UserProgressManager.LIBRARY_LESSONS,
+            itemNumber = 2,
+            itemId = "lesson_2",
+            currentTab = "متن کامل درس",
+            currentSectionIndex = 1,
+            displayTitle = "درس ۲: خانواده و دوستان"
+        )
+
+        var currentPos = progressManager.getSavedReadingPosition()
+        assertNotNull(currentPos)
+        assertEquals(com.example.data.storage.UserProgressManager.LIBRARY_LESSONS, currentPos?.libraryId)
+        assertEquals(2, currentPos?.itemNumber)
+        assertEquals("lesson_2", currentPos?.itemId)
+        assertEquals("متن کامل درس", currentPos?.currentTab)
+        assertEquals(1, currentPos?.currentSectionIndex)
+        assertEquals("درس ۲: خانواده و دوستان", currentPos?.displayTitle)
+        assertEquals(currentPos, progressManager.savedReadingPositionFlow.value)
+
+        val newManager = com.example.data.storage.UserProgressManager(context)
+        val loadedPos = newManager.getSavedReadingPosition()
+        assertNotNull(loadedPos)
+        assertEquals("lesson_2", loadedPos?.itemId)
+        assertEquals("متن کامل درس", loadedPos?.currentTab)
+        assertEquals(1, loadedPos?.currentSectionIndex)
+
+        // 2. Save reading position for Grammar Topics (گرامر)
+        progressManager.saveReadingPosition(
+            libraryId = com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR,
+            itemNumber = 3,
+            itemId = "topic_3",
+            currentTab = "مرور قدم‌به‌قدم",
+            currentSectionIndex = 2,
+            displayTitle = "گرامر ۳: حروف اضافه داتیو"
+        )
+        currentPos = progressManager.getSavedReadingPosition()
+        assertNotNull(currentPos)
+        assertEquals(com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR, currentPos?.libraryId)
+        assertEquals(3, currentPos?.itemNumber)
+        assertEquals("topic_3", currentPos?.itemId)
+        assertEquals(2, currentPos?.currentSectionIndex)
+
+        // 3. Save reading position for Grammar Book (کتاب گرامر)
+        progressManager.saveReadingPosition(
+            libraryId = com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR_BOOK,
+            itemNumber = 1,
+            itemId = "grammar_lesson_1",
+            currentTab = "تمرینها",
+            currentSectionIndex = 3,
+            displayTitle = "کتاب گرامر: درس ۱ - ضمایر فاعلی"
+        )
+        currentPos = progressManager.getSavedReadingPosition()
+        assertNotNull(currentPos)
+        assertEquals(com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR_BOOK, currentPos?.libraryId)
+        assertEquals(1, currentPos?.itemNumber)
+        assertEquals("grammar_lesson_1", currentPos?.itemId)
+        assertEquals(3, currentPos?.currentSectionIndex)
+
+        // 4. Clear reading position (dismiss)
+        progressManager.clearReadingPosition()
+        org.junit.Assert.assertNull(progressManager.getSavedReadingPosition())
+        org.junit.Assert.assertNull(progressManager.savedReadingPositionFlow.value)
+
+        val freshManager = com.example.data.storage.UserProgressManager(context)
+        org.junit.Assert.assertNull(freshManager.getSavedReadingPosition())
+    }
 }
 

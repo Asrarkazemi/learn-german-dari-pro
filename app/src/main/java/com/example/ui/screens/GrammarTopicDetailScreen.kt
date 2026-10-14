@@ -53,6 +53,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -91,6 +92,7 @@ fun GrammarTopicDetailScreen(
     onBack: () -> Unit,
     onPlayAudio: (String, Boolean) -> Unit,
     ttsManager: com.example.util.TtsManager? = null,
+    initialSectionIndex: Int = 0,
     modifier: Modifier = Modifier
 ) {
     BackHandler { onBack() }
@@ -99,8 +101,12 @@ fun GrammarTopicDetailScreen(
     var exerciseScore by remember(topic.id) { mutableIntStateOf(0) }
     var isExerciseCompleted by remember(topic.id) { mutableStateOf(false) }
 
-    var isStepByStepMode by remember(topic.id) { mutableStateOf(false) }
-    var currentStepIndex by remember(topic.id) { mutableIntStateOf(0) }
+    var isStepByStepMode by remember(topic.id, initialSectionIndex) {
+        mutableStateOf(initialSectionIndex > 0 && topic.sections.size > 1)
+    }
+    var currentStepIndex by remember(topic.id, initialSectionIndex) {
+        mutableIntStateOf(if (topic.sections.isNotEmpty()) initialSectionIndex.coerceIn(0, topic.sections.size - 1) else 0)
+    }
 
     val immersiveState = LocalImmersiveUiState.current
 
@@ -108,6 +114,20 @@ fun GrammarTopicDetailScreen(
     val progressManager = remember { com.example.data.storage.UserProgressManager.getInstance(context) }
     val effectiveTts = ttsManager ?: remember { com.example.util.TtsManager(context) }
     val isSequentialPlaying by effectiveTts.isSequentialPlayingFlow.collectAsState()
+
+    LaunchedEffect(topic.id, isStepByStepMode, currentStepIndex) {
+        progressManager.recordStudyDay()
+        val currentTabTitle = if (isStepByStepMode) "بخش ${currentStepIndex + 1}" else "توضیحات و قواعد"
+        val sectionIdx = if (isStepByStepMode) currentStepIndex else 0
+        progressManager.saveReadingPosition(
+            libraryId = com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR,
+            itemNumber = topic.number,
+            itemId = topic.id,
+            currentTab = currentTabTitle,
+            currentSectionIndex = sectionIdx,
+            displayTitle = "گرامر ${topic.number}: ${topic.titleDari}"
+        )
+    }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
         LazyColumn(
