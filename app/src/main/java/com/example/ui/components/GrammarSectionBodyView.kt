@@ -754,19 +754,36 @@ private fun renderSubheading(line: String) {
 }
 
 /**
+ * Finds the span (openParenIndex, closeParenIndex) of a genuine Dari translation in parentheses
+ * at or near the end of a line. Returns null if no genuine Dari parenthesis exists.
+ */
+private fun findDariParenthesisSpan(line: String): Pair<Int, Int>? {
+    val closeParen = line.lastIndexOf(')')
+    if (closeParen <= 2) return null
+    val afterClose = line.substring(closeParen + 1).trim()
+    if (afterClose.isNotEmpty() && afterClose != "." && afterClose != "؛" && afterClose != ":" && afterClose != "!") {
+        return null
+    }
+    val openParen = line.lastIndexOf('(', closeParen)
+    if (openParen <= 0) return null
+    val inside = line.substring(openParen + 1, closeParen).trim()
+    val hasPersian = inside.any { it in '\u0600'..'\u06FF' }
+    if (!hasPersian) return null
+    return Pair(openParen, closeParen)
+}
+
+/**
  * Detects patterns like "- Ich heiße... (من نامیده می‌شوم)" where German is outside
- * and Dari translation is in parentheses.
+ * and Dari translation is in parentheses. Lines with cloze blanks ⟦...⟧ are excluded
+ * so their complete sentences render inline without blank/marker truncation.
  */
 fun isGermanItemWithDariParenthesis(line: String): Boolean {
-    val openParen = line.indexOf('(')
-    val closeParen = line.lastIndexOf(')')
-    if (openParen > 2 && closeParen > openParen) {
-        val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").trim()
-        val insideParen = line.substring(openParen + 1, closeParen).trim()
-        val cleanBefore = beforeParen.replace("⟦", "").replace("⟧", "")
-        return (isMainlyLatin(cleanBefore) || beforeParen.contains("⟦")) && !isMainlyLatin(insideParen)
-    }
-    return false
+    if (line.contains("⟦") || line.contains("⟧")) return false
+    val span = findDariParenthesisSpan(line) ?: return false
+    val (openParen, _) = span
+    val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").removePrefix("*").trim()
+    val cleanBefore = beforeParen.replace("⟦", "").replace("⟧", "")
+    return isMainlyLatin(cleanBefore)
 }
 
 @Composable
@@ -779,10 +796,19 @@ private fun renderGermanWithDariParenthesis(
     filledBlanks: MutableMap<String, String> = remember { mutableStateMapOf() },
     isRevealedAll: Boolean = false
 ) {
-    val openParen = line.indexOf('(')
-    val closeParen = line.lastIndexOf(')')
-    val beforeParen = line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").trim()
-    val insideParen = line.substring(openParen + 1, closeParen).trim()
+    val span = findDariParenthesisSpan(line)
+    val openParen = span?.first ?: line.lastIndexOf('(')
+    val closeParen = span?.second ?: line.lastIndexOf(')')
+    val beforeParen = if (openParen > 0) {
+        line.substring(0, openParen).removePrefix("•").removePrefix("-").removePrefix("–").removePrefix("*").trim()
+    } else {
+        line.trim()
+    }
+    val insideParen = if (openParen in 0 until closeParen) {
+        line.substring(openParen + 1, closeParen).trim()
+    } else {
+        ""
+    }
     val completedBefore = resolveCompletedGermanText(beforeParen)
 
     Surface(
