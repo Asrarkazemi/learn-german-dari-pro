@@ -510,14 +510,12 @@ class ExampleRobolectricTest {
     @Test
     fun `verify Gemini Chat error classification and fallback order`() {
         // Primary model check
-        assertEquals("gemini-3.5-flash", com.example.data.gemini.GeminiChatService.PRIMARY_MODEL)
+        assertEquals("gemini-3.8-flash", com.example.data.gemini.GeminiChatService.PRIMARY_MODEL)
 
         // Exact fallback order check
         val expectedFallbacks = listOf(
-            "gemini-3.5-flash",
-            "gemini-2.5-flash",
-            "gemini-2.5-flash-lite",
-            "gemini-2.0-flash"
+            "gemini-3.8-flash",
+            "gemini-3.8-flash-lite"
         )
         assertEquals(expectedFallbacks, com.example.data.gemini.GeminiChatService.FALLBACK_MODELS)
 
@@ -538,6 +536,129 @@ class ExampleRobolectricTest {
 
         // Key errors must NOT be classified as server busy
         org.junit.Assert.assertFalse(com.example.data.gemini.GeminiChatService.isServerBusy(401, "Unauthorized"))
+    }
+
+    @Test
+    fun `verify Fix G three modes configuration, execution plans, thinking levels, silent fallback, and light mode caching`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // 1. Verify Mode 1 - Light (⚡ سبک)
+        val lightMode = com.example.data.gemini.ChatMode.LIGHT
+        assertEquals("⚡ سبک", lightMode.label)
+        assertEquals("gemini-3.8-flash-lite", lightMode.primaryModel)
+        assertEquals(0.3, lightMode.temperature, 0.001)
+        assertEquals("low", lightMode.thinkingLevel)
+        assertEquals(
+            "تو یک دستیار سریع آموزش زبان آلمانی هستی. پاسخها را بسیار کوتاه، دقیق و بدون حاشیه به زبان فارسی بده. اگر کاربر کلمه یا اصطلاحی فرستاد، فقط معنی، آرتیکل (der/die/das)، حالت جمع و یک مثال کوتاه آلمانی با ترجمه فارسی بنویس.",
+            lightMode.systemInstruction
+        )
+
+        // 2. Verify Mode 2 - Normal (⚖️ معمولی)
+        val normalMode = com.example.data.gemini.ChatMode.NORMAL
+        assertEquals("⚖️ معمولی", normalMode.label)
+        assertEquals("gemini-3.8-flash", normalMode.primaryModel)
+        assertEquals(0.6, normalMode.temperature, 0.001)
+        assertEquals("low", normalMode.thinkingLevel)
+        assertEquals(
+            "تو یک معلم صمیمی زبان آلمانی هستی. به سوالات کاربر با بیانی ساده و کاربردی پاسخ بده، مثالهای روزمره آلمانی همراه با ترجمه فارسی بیاور و اشتباهات واضح کاربر را به آرامی اصلاح کن.",
+            normalMode.systemInstruction
+        )
+
+        // 3. Verify Mode 3 - Deep (🧠 عمیق)
+        val deepMode = com.example.data.gemini.ChatMode.DEEP
+        assertEquals("🧠 عمیق", deepMode.label)
+        assertEquals("gemini-3.8-flash", deepMode.primaryModel)
+        assertEquals(0.7, deepMode.temperature, 0.001)
+        assertEquals("high", deepMode.thinkingLevel)
+        assertEquals(
+            "تو یک استاد برجسته گرامر و ممتحن آزمونهای زبان آلمانی (Goethe / DTZ / TestDaF) هستی. متن یا سوال کاربر را به صورت عمیق کالبدشکافی کن. تمام نکات گرامری (Kasus: Nominativ, Akkusativ, Dativ, Genitiv، جایگاه فعل، حروف اضافه و ساختار جمله) را با دلیل توضیح بده. در صورت وجود خطا، ابتدا علت خطا را بگو، سپس شکل صحیح و در نهایت معادل طبیعیتر و سطح بالاتر (B1/B2) آن را بنویس.",
+            deepMode.systemInstruction
+        )
+
+        // 4. Default mode must be LIGHT
+        assertEquals(com.example.data.gemini.ChatMode.LIGHT, com.example.data.gemini.ChatMode.fromNameOrDefault("unknown"))
+        assertEquals(com.example.data.gemini.ChatMode.LIGHT, com.example.data.gemini.ChatMode.fromNameOrDefault(null))
+
+        // 5. Verify Silent Fallback Execution Plans:
+        // DEEP: retry on gemini-3.8-flash keeping deep system instruction and high thinking -> then gemini-3.8-flash-lite with low thinking
+        val deepPlan = com.example.data.gemini.GeminiChatService.getExecutionPlan(com.example.data.gemini.ChatMode.DEEP)
+        assertEquals(3, deepPlan.size)
+        assertEquals("gemini-3.8-flash", deepPlan[0].model)
+        assertEquals("high", deepPlan[0].thinkingLevel)
+        assertEquals(deepMode.systemInstruction, deepPlan[0].systemInstruction)
+
+        assertEquals("gemini-3.8-flash", deepPlan[1].model)
+        assertEquals("high", deepPlan[1].thinkingLevel)
+        assertEquals(deepMode.systemInstruction, deepPlan[1].systemInstruction)
+
+        assertEquals("gemini-3.8-flash-lite", deepPlan[2].model)
+        assertEquals("low", deepPlan[2].thinkingLevel)
+        assertEquals(deepMode.systemInstruction, deepPlan[2].systemInstruction)
+
+        // NORMAL: retry on gemini-3.8-flash-lite
+        val normalPlan = com.example.data.gemini.GeminiChatService.getExecutionPlan(com.example.data.gemini.ChatMode.NORMAL)
+        assertEquals(2, normalPlan.size)
+        assertEquals("gemini-3.8-flash", normalPlan[0].model)
+        assertEquals("low", normalPlan[0].thinkingLevel)
+        assertEquals(normalMode.systemInstruction, normalPlan[0].systemInstruction)
+
+        assertEquals("gemini-3.8-flash-lite", normalPlan[1].model)
+        assertEquals("low", normalPlan[1].thinkingLevel)
+        assertEquals(normalMode.systemInstruction, normalPlan[1].systemInstruction)
+
+        // LIGHT: flash-lite
+        val lightPlan = com.example.data.gemini.GeminiChatService.getExecutionPlan(com.example.data.gemini.ChatMode.LIGHT)
+        assertEquals(2, lightPlan.size)
+        assertEquals("gemini-3.8-flash-lite", lightPlan[0].model)
+        assertEquals("low", lightPlan[0].thinkingLevel)
+        assertEquals(lightMode.systemInstruction, lightPlan[0].systemInstruction)
+
+        // 6. Verify request body builder includes thinking_level and temperature
+        val service = com.example.data.gemini.GeminiChatService(context)
+        val deepBodyJson = service.buildRequestBody(
+            userMessage = "Grammatik Test",
+            systemInstruction = deepMode.systemInstruction,
+            temperature = deepMode.temperature,
+            thinkingLevel = deepMode.thinkingLevel
+        )
+        val deepJsonObj = org.json.JSONObject(deepBodyJson)
+        val deepGenConfig = deepJsonObj.getJSONObject("generationConfig")
+        assertEquals(0.7, deepGenConfig.getDouble("temperature"), 0.001)
+        val deepThinking = deepGenConfig.getJSONObject("thinkingConfig")
+        assertEquals("high", deepThinking.getString("thinking_level"))
+
+        val lightBodyJson = service.buildRequestBody(
+            userMessage = "Tisch",
+            systemInstruction = lightMode.systemInstruction,
+            temperature = lightMode.temperature,
+            thinkingLevel = lightMode.thinkingLevel
+        )
+        val lightJsonObj = org.json.JSONObject(lightBodyJson)
+        val lightGenConfig = lightJsonObj.getJSONObject("generationConfig")
+        assertEquals(0.3, lightGenConfig.getDouble("temperature"), 0.001)
+        val lightThinking = lightGenConfig.getJSONObject("thinkingConfig")
+        assertEquals("low", lightThinking.getString("thinking_level"))
+
+        // 7. Verify persistent local cache for LIGHT mode only
+        val cache = service.lightCache
+        cache.clear()
+        org.junit.Assert.assertNull(cache.get("Hund"))
+
+        val cachedAnswer = "der Hund (جمع: die Hunde) - سگ\nمثال: Der Hund bellt. (سگ پارس می‌کند.)"
+        cache.put("Hund", cachedAnswer)
+
+        // Case-insensitivity and trim checks
+        assertEquals(cachedAnswer, cache.get("Hund"))
+        assertEquals(cachedAnswer, cache.get("hund"))
+        assertEquals(cachedAnswer, cache.get("  HUND  "))
+
+        // Ensure cache persists in SharedPreferences across service instances
+        val service2 = com.example.data.gemini.GeminiChatService(context)
+        assertEquals(cachedAnswer, service2.lightCache.get("hund"))
+
+        // Cleanup
+        cache.clear()
+        org.junit.Assert.assertNull(cache.get("hund"))
     }
 
     @Test

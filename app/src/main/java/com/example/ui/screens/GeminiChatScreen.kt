@@ -37,6 +37,7 @@ import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.FilledIconButton
 import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
@@ -66,6 +67,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.gemini.ChatMessage
+import com.example.data.gemini.ChatMode
 import com.example.data.gemini.GeminiChatException
 import com.example.data.gemini.GeminiChatService
 import com.example.data.model.GrammarTopic
@@ -98,7 +100,12 @@ fun GeminiChatScreen(
     val context = LocalContext.current
     val clipboardManager = LocalClipboardManager.current
     val coroutineScope = rememberCoroutineScope()
-    val chatService = remember { GeminiChatService() }
+    val chatService = remember { GeminiChatService(context) }
+    val chatPrefs = remember { context.getSharedPreferences("gemini_chat_prefs", android.content.Context.MODE_PRIVATE) }
+    var selectedMode by remember {
+        val saved = chatPrefs.getString("selected_chat_mode", ChatMode.LIGHT.name)
+        mutableStateOf(ChatMode.fromNameOrDefault(saved))
+    }
     val progressManager = remember { UserProgressManager.getInstance(context) }
     val azureKey by progressManager.azureSpeechKeyFlow.collectAsState()
     val voiceProvider by progressManager.voiceProviderFlow.collectAsState()
@@ -140,6 +147,7 @@ fun GeminiChatScreen(
 
     fun sendUserPrompt(prompt: String) {
         if (prompt.isBlank() || isLoading) return
+        val currentMode = selectedMode
         val userMsg = ChatMessage(isUser = true, text = prompt)
         messages.add(userMsg)
         lastUserPrompt = prompt
@@ -152,6 +160,7 @@ fun GeminiChatScreen(
                 userMessage = prompt,
                 conversationHistory = messages,
                 apiKey = currentApiKey,
+                mode = currentMode,
                 onStatusUpdate = { status ->
                     loadingStatusText = status
                 }
@@ -312,6 +321,60 @@ fun GeminiChatScreen(
 
         HorizontalDivider(
             color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+            thickness = 1.dp
+        )
+
+        // MODE SELECTOR: 3 modes (⚡ سبک, ⚖️ معمولی, 🧠 عمیق)
+        Surface(
+            modifier = Modifier
+                .fillMaxWidth()
+                .wrapContentHeight()
+                .testTag("gemini_chat_mode_selector"),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 1.dp
+        ) {
+            Row(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 12.dp, vertical = 6.dp),
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                ChatMode.entries.forEach { mode ->
+                    val isSelected = selectedMode == mode
+                    FilterChip(
+                        selected = isSelected,
+                        onClick = {
+                            selectedMode = mode
+                            chatPrefs.edit().putString("selected_chat_mode", mode.name).apply()
+                        },
+                        label = {
+                            Text(
+                                text = mode.label,
+                                fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 12.5.sp
+                            )
+                        },
+                        modifier = Modifier
+                            .weight(1f)
+                            .testTag("chat_mode_chip_${mode.name.lowercase()}"),
+                        shape = RoundedCornerShape(12.dp),
+                        colors = FilterChipDefaults.filterChipColors(
+                            selectedContainerColor = MaterialTheme.colorScheme.primaryContainer,
+                            selectedLabelColor = MaterialTheme.colorScheme.onPrimaryContainer
+                        ),
+                        border = FilterChipDefaults.filterChipBorder(
+                            enabled = true,
+                            selected = isSelected,
+                            borderColor = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
+                        )
+                    )
+                }
+            }
+        }
+
+        HorizontalDivider(
+            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f),
             thickness = 1.dp
         )
 
