@@ -2,7 +2,9 @@ package com.example.ui.screens
 
 import android.widget.Toast
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -12,9 +14,11 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.wrapContentHeight
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
@@ -29,8 +33,6 @@ import androidx.compose.material.icons.filled.Female
 import androidx.compose.material.icons.filled.Male
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Stop
-import androidx.compose.material.icons.filled.Visibility
-import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -47,6 +49,7 @@ import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateMapOf
@@ -350,7 +353,7 @@ fun DialogueMakerScreen(
                     enabled = !isGenerating,
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(48.dp)
+                        .heightIn(min = 48.dp)
                         .testTag("btn_generate_dialogue"),
                     shape = RoundedCornerShape(12.dp),
                     colors = ButtonDefaults.buttonColors(containerColor = IndigoPrimary)
@@ -362,11 +365,11 @@ fun DialogueMakerScreen(
                             color = Color.White
                         )
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text(statusMessage ?: "در حال ساخت…", fontWeight = FontWeight.Bold)
+                        Text(statusMessage ?: "در حال تولید…", fontWeight = FontWeight.Bold, maxLines = 1)
                     } else {
                         Icon(Icons.Default.AutoAwesome, contentDescription = null, modifier = Modifier.size(18.dp))
                         Spacer(modifier = Modifier.width(8.dp))
-                        Text("ساخت مکالمه", fontWeight = FontWeight.Bold)
+                        Text("تولید مکالمه", fontWeight = FontWeight.Bold, maxLines = 1, softWrap = false)
                     }
                 }
             }
@@ -532,16 +535,23 @@ fun DialogueMakerScreen(
 
         Spacer(modifier = Modifier.height(10.dp))
 
+        // Auto-scroll to currently playing line without clipping
+        LaunchedEffect(currentlyPlayingIndex) {
+            if (currentlyPlayingIndex in lines.indices) {
+                listState.animateScrollToItem(currentlyPlayingIndex)
+            }
+        }
+
         // Dialogue lines list
         LazyColumn(
             state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp)
         ) {
-            itemsIndexed(lines) { index, line ->
+            itemsIndexed(lines, key = { index, _ -> index }) { index, line ->
                 val isPlayingThis = (currentlyPlayingIndex == index)
                 DialogueLineCard(
                     line = line,
@@ -554,6 +564,13 @@ fun DialogueMakerScreen(
     }
 }
 
+private fun stripSpeakerPrefix(text: String): String {
+    return text
+        .replace(Regex("""^\[?(?:Person\s+[AB12]|Speaker\s+[AB12]|شخص\s+[AB12]|[AB12])\]?\s*[:：\-–—]\s*""", RegexOption.IGNORE_CASE), "")
+        .replace(Regex("""^\((?:Person\s+[AB12]|Speaker\s+[AB12]|شخص\s+[AB12]|[AB12])\)\s*[:：\-–—]?\s*""", RegexOption.IGNORE_CASE), "")
+        .trim()
+}
+
 @Composable
 fun DialogueLineCard(
     line: DialogueMakerLine,
@@ -563,115 +580,165 @@ fun DialogueLineCard(
     modifier: Modifier = Modifier
 ) {
     val isSpeakerA = line.isSpeakerA
-    val speakerColor = if (isSpeakerA) Color(0xFF2563EB) else Color(0xFFD946EF)
-    val speakerBg = if (isSpeakerA) Color(0xFFEFF6FF) else Color(0xFFFDF4FF)
     val speakerName = if (isSpeakerA) "شخص A (کنراد)" else "شخص B (کلارا)"
+    val isDark = isSystemInDarkTheme()
 
-    var showTranslation by remember { mutableStateOf(true) }
+    val cleanGerman = remember(line.german) { stripSpeakerPrefix(line.german) }
+    val cleanPronunciation = remember(line.pronunciation) { stripSpeakerPrefix(line.pronunciation) }
+    val cleanTranslation = remember(line.translationDari) { stripSpeakerPrefix(line.translationDari) }
+
+    // Theme-aware high-contrast colors for both light and dark themes
+    val cardBg = when {
+        isPlaying -> if (isDark) {
+            if (isSpeakerA) Color(0xFF1E293B) else Color(0xFF3B1E38)
+        } else {
+            if (isSpeakerA) Color(0xFFEFF6FF) else Color(0xFFFDF4FF)
+        }
+        else -> MaterialTheme.colorScheme.surface
+    }
+
+    val cardBorder = when {
+        isPlaying -> if (isDark) {
+            if (isSpeakerA) Color(0xFF60A5FA) else Color(0xFFF472B6)
+        } else {
+            if (isSpeakerA) Color(0xFF3B82F6) else Color(0xFFEC4899)
+        }
+        else -> MaterialTheme.colorScheme.outlineVariant.copy(alpha = if (isDark) 0.35f else 0.5f)
+    }
+
+    val chipBg = when {
+        isPlaying -> if (isDark) {
+            if (isSpeakerA) Color(0xFF0F172A) else Color(0xFF261025)
+        } else {
+            if (isSpeakerA) Color(0xFFDBEAFE) else Color(0xFFFCE7F3)
+        }
+        else -> if (isDark) {
+            if (isSpeakerA) Color(0xFF1E293B) else Color(0xFF2E1A2D)
+        } else {
+            if (isSpeakerA) Color(0xFFEFF6FF) else Color(0xFFFDF4FF)
+        }
+    }
+
+    val chipTextColor = if (isDark) {
+        if (isSpeakerA) Color(0xFF93C5FD) else Color(0xFFF9A8D4)
+    } else {
+        if (isSpeakerA) Color(0xFF1D4ED8) else Color(0xFFBE185D)
+    }
+
+    val germanColor = when {
+        isPlaying -> if (isDark) Color(0xFFF8FAFC) else Color(0xFF0F172A)
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+
+    val pronunciationColor = when {
+        isPlaying -> if (isDark) Color(0xFFCBD5E1) else Color(0xFF475569)
+        else -> MaterialTheme.colorScheme.onSurfaceVariant
+    }
+
+    val translationColor = when {
+        isPlaying -> if (isDark) {
+            if (isSpeakerA) Color(0xFF93C5FD) else Color(0xFFF9A8D4)
+        } else {
+            if (isSpeakerA) Color(0xFF1D4ED8) else Color(0xFFBE185D)
+        }
+        else -> MaterialTheme.colorScheme.primary
+    }
 
     Card(
         modifier = modifier
             .fillMaxWidth()
+            .wrapContentHeight()
             .testTag("dialogue_line_$index"),
         shape = RoundedCornerShape(16.dp),
-        colors = CardDefaults.cardColors(
-            containerColor = if (isPlaying) speakerBg else MaterialTheme.colorScheme.surface
-        ),
+        colors = CardDefaults.cardColors(containerColor = cardBg),
+        border = BorderStroke(if (isPlaying) 2.dp else 1.dp, cardBorder),
         elevation = CardDefaults.cardElevation(defaultElevation = if (isPlaying) 3.dp else 1.dp)
     ) {
-        Column(modifier = Modifier.padding(14.dp)) {
-            // Speaker tag row + Audio play button
+        Column(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp)
+        ) {
+            // Speaker tag row + Audio play button (speaker chip appears exactly once)
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.CenterVertically
             ) {
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Surface(
-                        shape = RoundedCornerShape(8.dp),
-                        color = speakerBg
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = chipBg,
+                    border = BorderStroke(0.5.dp, chipTextColor.copy(alpha = 0.3f))
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp)
-                        ) {
-                            Icon(
-                                imageVector = if (isSpeakerA) Icons.Default.Male else Icons.Default.Female,
-                                contentDescription = null,
-                                tint = speakerColor,
-                                modifier = Modifier.size(15.dp)
-                            )
-                            Spacer(modifier = Modifier.width(4.dp))
-                            Text(
-                                text = speakerName,
-                                fontSize = 11.5.sp,
-                                fontWeight = FontWeight.Bold,
-                                color = speakerColor
-                            )
-                        }
+                        Icon(
+                            imageVector = if (isSpeakerA) Icons.Default.Male else Icons.Default.Female,
+                            contentDescription = null,
+                            tint = chipTextColor,
+                            modifier = Modifier.size(15.dp)
+                        )
+                        Spacer(modifier = Modifier.width(4.dp))
+                        Text(
+                            text = speakerName,
+                            fontSize = 11.5.sp,
+                            fontWeight = FontWeight.Bold,
+                            color = chipTextColor
+                        )
                     }
                 }
 
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    IconButton(
-                        onClick = { showTranslation = !showTranslation },
-                        modifier = Modifier.size(36.dp)
-                    ) {
-                        Icon(
-                            imageVector = if (showTranslation) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                            contentDescription = "نمایش یا پنهان‌سازی ترجمه",
-                            modifier = Modifier.size(18.dp),
-                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                        )
-                    }
-
-                    IconButton(
-                        onClick = onPlay,
-                        modifier = Modifier
-                            .size(36.dp)
-                            .clip(CircleShape)
-                            .background(if (isPlaying) speakerColor else speakerBg)
-                    ) {
-                        Icon(
-                            imageVector = if (isPlaying) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
-                            contentDescription = "پخش صدا",
-                            tint = if (isPlaying) Color.White else speakerColor,
-                            modifier = Modifier.size(18.dp)
-                        )
-                    }
+                IconButton(
+                    onClick = onPlay,
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(if (isPlaying) chipTextColor else chipBg)
+                ) {
+                    Icon(
+                        imageVector = if (isPlaying) Icons.Default.Stop else Icons.AutoMirrored.Filled.VolumeUp,
+                        contentDescription = "پخش صدا",
+                        tint = if (isPlaying) Color.White else chipTextColor,
+                        modifier = Modifier.size(18.dp)
+                    )
                 }
             }
 
             Spacer(modifier = Modifier.height(8.dp))
 
-            // German text
+            // 1. German text (LTR) - fully visible
             CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                 Text(
-                    text = line.german,
+                    text = cleanGerman,
                     fontWeight = FontWeight.Bold,
                     fontSize = 15.5.sp,
-                    color = MaterialTheme.colorScheme.onSurface
+                    color = germanColor,
+                    lineHeight = 22.sp
                 )
             }
 
-            // Persian-script pronunciation
-            if (line.pronunciation.isNotBlank()) {
-                Spacer(modifier = Modifier.height(3.dp))
-                Text(
-                    text = "تلفظ: ${line.pronunciation}",
-                    fontSize = 12.5.sp,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
-            }
-
-            // Dari translation
-            if (showTranslation && line.translationDari.isNotBlank()) {
+            // 2. Persian-script pronunciation - fully visible
+            if (cleanPronunciation.isNotBlank()) {
                 Spacer(modifier = Modifier.height(4.dp))
                 Text(
-                    text = line.translationDari,
+                    text = "تلفظ: $cleanPronunciation",
+                    fontSize = 12.5.sp,
+                    color = pronunciationColor,
+                    lineHeight = 18.sp
+                )
+            }
+
+            // 3. Dari translation / meaning - fully visible
+            if (cleanTranslation.isNotBlank()) {
+                Spacer(modifier = Modifier.height(4.dp))
+                Text(
+                    text = cleanTranslation,
                     fontSize = 13.5.sp,
-                    color = MaterialTheme.colorScheme.primary,
-                    fontWeight = FontWeight.Medium
+                    color = translationColor,
+                    fontWeight = FontWeight.Medium,
+                    lineHeight = 20.sp
                 )
             }
         }

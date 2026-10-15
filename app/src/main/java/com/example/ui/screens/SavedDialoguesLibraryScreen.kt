@@ -20,6 +20,7 @@ import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -41,6 +42,7 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
@@ -348,6 +350,14 @@ private fun SavedDialogueDetailView(
         }
     }
 
+    val listState = rememberLazyListState()
+
+    LaunchedEffect(currentlyPlayingIndex) {
+        if (currentlyPlayingIndex in dialogue.lines.indices) {
+            listState.animateScrollToItem(currentlyPlayingIndex)
+        }
+    }
+
     Column(
         modifier = modifier
             .fillMaxSize()
@@ -408,13 +418,14 @@ private fun SavedDialogueDetailView(
         Spacer(modifier = Modifier.height(12.dp))
 
         LazyColumn(
+            state = listState,
             modifier = Modifier
                 .fillMaxSize()
                 .weight(1f),
-            verticalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = PaddingValues(bottom = 16.dp)
+            verticalArrangement = Arrangement.spacedBy(10.dp),
+            contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp)
         ) {
-            itemsIndexed(dialogue.lines) { index, line ->
+            itemsIndexed(dialogue.lines, key = { index, _ -> index }) { index, line ->
                 val isPlayingThis = (currentlyPlayingIndex == index)
                 DialogueLineCard(
                     line = line,

@@ -494,7 +494,7 @@ fun MainScreen(
                                 onImportLessonJson = { json -> courseRepository.importLesson(json) },
                                 onPlayAudio = { text, isSlow -> ttsManager.speak(text, isSlow) },
                                 onImportGrammarJson = { json -> grammarRepository.importTopic(json) },
-                                onTestVoice = { key, speed -> ttsManager.testGeminiVoice(speed = speed, keyOverride = key) }
+                                onTestVoice = { _, speed -> ttsManager.testVoice(speed = speed) }
                             )
                         }
                     }
@@ -515,8 +515,8 @@ fun MainScreen(
                     showVoiceSettingsDialog = false
                     voiceSettingsInitialProvider = null
                 },
-                onTestVoice = { key, speed ->
-                    ttsManager.testGeminiVoice(speed = speed, keyOverride = key)
+                onTestVoice = { _, speed ->
+                    ttsManager.testVoice(speed = speed)
                 },
                 ttsManager = ttsManager,
                 initialProvider = voiceSettingsInitialProvider

@@ -104,7 +104,7 @@ fun VoiceSettingsDialog(
     val dailyGeminiRequestsCount by progressManager.dailyGeminiRequestsFlow.collectAsState()
     val dailyAzureRequestsCount by progressManager.dailyAzureRequestsFlow.collectAsState()
 
-    var selectedProvider by remember { mutableStateOf(initialProvider ?: progressManager.getVoiceProvider()) }
+    var selectedProvider by remember { mutableStateOf(UserProgressManager.VOICE_PROVIDER_AZURE) }
 
     var geminiKeyText by remember { mutableStateOf(currentKey.ifEmpty { progressManager.getEffectiveGeminiApiKey() }) }
     var isGeminiKeyVisible by remember { mutableStateOf(false) }
@@ -128,17 +128,10 @@ fun VoiceSettingsDialog(
     var importReportMessage by remember { mutableStateOf<String?>(null) }
     var isImportError by remember { mutableStateOf(false) }
 
-    // Active voice status chip calculation
-    val activeChipText = remember(selectedProvider, azureKeyText, geminiKeyText) {
+    // Active voice status chip calculation (Azure-only voice engine)
+    val activeChipText = remember(azureKeyText) {
         val hasAzure = azureKeyText.trim().isNotBlank()
-        val hasGemini = geminiKeyText.trim().isNotBlank()
-        when {
-            selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE && hasAzure -> "صدا: آژور ✨"
-            selectedProvider == UserProgressManager.VOICE_PROVIDER_GEMINI && hasGemini -> "صدا: جیمنای ✨"
-            hasAzure -> "صدا: آژور ✨"
-            hasGemini -> "صدا: جیمنای ✨"
-            else -> "صدا: گوشی"
-        }
+        if (hasAzure) "صدا: آژور ✨" else "صدا: گوشی"
     }
 
     // File picker launcher for ZIP import
@@ -310,7 +303,7 @@ fun VoiceSettingsDialog(
                     .padding(horizontal = 8.dp)
             ) {
                 Text(
-                    text = "سیستم صوتی دوگانه و دوزبانه (آلمانی + ترجمهٔ دری). در صورت بروز خطا در سرویس انتخاب‌شده، سرویس دیگر و سپس صدای گوشی به صورت خودکار جایگزین می‌گردد.",
+                    text = "سیستم صوتی اختصاصی مایکروسافت آژور (Azure Speech) دوزبانه (آلمانی + ترجمهٔ دری). در صورت عدم تنظیم کلید یا خطا، صدای گوشی جایگزین می‌گردد.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     lineHeight = 20.sp,
@@ -321,93 +314,38 @@ fun VoiceSettingsDialog(
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // PROVIDER SELECTOR: Microsoft Azure / Google Gemini
-                Text(
-                    text = "موتور اصلی تولید صدا:",
-                    style = MaterialTheme.typography.labelMedium,
-                    fontWeight = FontWeight.Bold,
-                    color = MaterialTheme.colorScheme.onSurface
-                )
-
-                Spacer(modifier = Modifier.height(6.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                // AZURE-ONLY VOICE ENGINE BANNER
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    border = BorderStroke(1.5.dp, MaterialTheme.colorScheme.primary),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("provider_chip_azure")
                 ) {
-                    val isAzure = selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE
-                    Surface(
-                        onClick = {
-                            selectedProvider = UserProgressManager.VOICE_PROVIDER_AZURE
-                            testResultSuccess = null
-                            testResultError = null
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isAzure) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = BorderStroke(
-                            width = if (isAzure) 1.5.dp else 1.dp,
-                            color = if (isAzure) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("provider_chip_azure")
+                    Box(
+                        modifier = Modifier.padding(vertical = 10.dp),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Box(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Microsoft Azure",
-                                fontWeight = if (isAzure) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isAzure) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp
-                            )
-                        }
-                    }
-
-                    val isGemini = selectedProvider == UserProgressManager.VOICE_PROVIDER_GEMINI
-                    Surface(
-                        onClick = {
-                            selectedProvider = UserProgressManager.VOICE_PROVIDER_GEMINI
-                            testResultSuccess = null
-                            testResultError = null
-                        },
-                        shape = RoundedCornerShape(10.dp),
-                        color = if (isGemini) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
-                        border = BorderStroke(
-                            width = if (isGemini) 1.5.dp else 1.dp,
-                            color = if (isGemini) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant
-                        ),
-                        modifier = Modifier
-                            .weight(1f)
-                            .testTag("provider_chip_gemini")
-                    ) {
-                        Box(
-                            modifier = Modifier.padding(vertical = 10.dp),
-                            contentAlignment = Alignment.Center
-                        ) {
-                            Text(
-                                text = "Google Gemini",
-                                fontWeight = if (isGemini) FontWeight.Bold else FontWeight.Medium,
-                                color = if (isGemini) MaterialTheme.colorScheme.onPrimaryContainer else MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontSize = 13.sp
-                            )
-                        }
+                        Text(
+                            text = "موتور صوتی سراسری: Microsoft Azure",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontSize = 13.sp
+                        )
                     }
                 }
 
                 Spacer(modifier = Modifier.height(14.dp))
 
-                // PROVIDER-SPECIFIC SETTINGS
-                if (selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE) {
-                    // AZURE SPEECH SETTINGS
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
+                // AZURE SPEECH SETTINGS
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
                             // Single Azure Speech Key label drawn once
                             Text(
                                 text = "کلید اشتراک Azure Speech Key",
@@ -558,75 +496,62 @@ fun VoiceSettingsDialog(
                             )
                         }
                     }
-                } else {
-                    // GEMINI SETTINGS
-                    Surface(
-                        shape = RoundedCornerShape(12.dp),
-                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
-                        border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
-                        modifier = Modifier.fillMaxWidth()
-                    ) {
-                        Column(modifier = Modifier.padding(12.dp)) {
-                            // Single Gemini API Key label drawn once
-                            Text(
-                                text = "کلید API جیمنای",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = FontWeight.Bold,
-                                color = MaterialTheme.colorScheme.onSurface
-                            )
 
-                            Spacer(modifier = Modifier.height(4.dp))
+                Spacer(modifier = Modifier.height(12.dp))
 
-                            // Gemini API key field with show/hide
-                            OutlinedTextField(
-                                value = geminiKeyText,
-                                onValueChange = {
-                                    geminiKeyText = it
-                                    testResultSuccess = null
-                                    testResultError = null
-                                },
-                                placeholder = { Text("AIzaSy...") },
-                                visualTransformation = if (isGeminiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
-                                trailingIcon = {
-                                    IconButton(
-                                        onClick = { isGeminiKeyVisible = !isGeminiKeyVisible },
-                                        modifier = Modifier.testTag("btn_toggle_gemini_key_visibility")
-                                    ) {
-                                        Icon(
-                                            imageVector = if (isGeminiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
-                                            contentDescription = if (isGeminiKeyVisible) "مخفی‌سازی کلید" else "نمایش کلید",
-                                            tint = MaterialTheme.colorScheme.onSurfaceVariant
-                                        )
-                                    }
-                                },
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .testTag("gemini_api_key_dialog_input"),
-                                shape = RoundedCornerShape(10.dp),
-                                singleLine = true
-                            )
+                // GEMINI SETTINGS (FOR TEXT CHAT & DIALOGUE GENERATION ONLY)
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                    border = BorderStroke(1.dp, MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.5f)),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Column(modifier = Modifier.padding(12.dp)) {
+                        Text(
+                            text = "کلید API جیمنای (ویژهٔ چت هوشمند و ساخت مکالمه متنی)",
+                            style = MaterialTheme.typography.labelSmall,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
 
-                            Spacer(modifier = Modifier.height(8.dp))
+                        Spacer(modifier = Modifier.height(4.dp))
 
-                            Text(
-                                text = "گوینده جیمنای: به صورت خودکار بر اساس جنسیت گوینده تنظیم می‌شود (مرد: Charon / زن: Kore).",
-                                style = MaterialTheme.typography.bodySmall,
-                                fontSize = 11.sp,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
+                        OutlinedTextField(
+                            value = geminiKeyText,
+                            onValueChange = {
+                                geminiKeyText = it
+                                testResultSuccess = null
+                                testResultError = null
+                            },
+                            placeholder = { Text("AIzaSy...") },
+                            visualTransformation = if (isGeminiKeyVisible) VisualTransformation.None else PasswordVisualTransformation(),
+                            trailingIcon = {
+                                IconButton(
+                                    onClick = { isGeminiKeyVisible = !isGeminiKeyVisible },
+                                    modifier = Modifier.testTag("btn_toggle_gemini_key_visibility")
+                                ) {
+                                    Icon(
+                                        imageVector = if (isGeminiKeyVisible) Icons.Default.VisibilityOff else Icons.Default.Visibility,
+                                        contentDescription = if (isGeminiKeyVisible) "مخفی‌سازی کلید" else "نمایش کلید",
+                                        tint = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .testTag("gemini_api_key_dialog_input"),
+                            shape = RoundedCornerShape(10.dp),
+                            singleLine = true
+                        )
 
-                            Spacer(modifier = Modifier.height(6.dp))
+                        Spacer(modifier = Modifier.height(6.dp))
 
-                            // Daily Gemini API requests counter
-                            val geminiDailyPersian = UserProgressManager.toPersianDigits("$dailyGeminiRequestsCount")
-                            Text(
-                                text = "درخواست‌های امروز به جیمنای: $geminiDailyPersian",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                                fontWeight = FontWeight.Medium,
-                                modifier = Modifier.testTag("daily_gemini_requests_text")
-                            )
-                        }
+                        Text(
+                            text = "این کلید صرفاً جهت نگارش متن و هوش مصنوعی چت استفاده می‌شود؛ صدا در سرتاسر برنامه توسط آژور پخش می‌گردد.",
+                            style = MaterialTheme.typography.bodySmall,
+                            fontSize = 11.sp,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
                     }
                 }
 
@@ -728,8 +653,8 @@ fun VoiceSettingsDialog(
                                 sampleGerman = "Guten Tag! Ich lerne Deutsch.",
                                 sampleDari = "روز بخیر! من آلمانی یاد می‌گیرم.",
                                 speed = currentSpeed,
-                                providerOverride = selectedProvider,
-                                keyOverride = if (selectedProvider == UserProgressManager.VOICE_PROVIDER_AZURE) azureKeyText else geminiKeyText,
+                                providerOverride = UserProgressManager.VOICE_PROVIDER_AZURE,
+                                keyOverride = azureKeyText,
                                 regionOverride = azureRegionText,
                                 voiceOverride = selectedVoice
                             )

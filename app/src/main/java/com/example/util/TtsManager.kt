@@ -385,72 +385,23 @@ class TtsManager(
     }
 
     /**
-     * Synthesizes audio using Google Gemini TTS API.
-     * Fallback: gemini-2.5-flash-tts -> gemini-2.5-flash-preview-tts.
-     * Saves audio to filesDir/voice_library/ as WAV.
+     * Gemini TTS is disabled app-wide per Azure-only voice specification.
      */
     suspend fun synthesizeGeminiAudioToLibrary(
         text: String,
         isPersian: Boolean,
         apiKey: String,
         voiceOverride: String? = null
-    ): File? = withContext(Dispatchers.IO) {
-        val clean = text.trim()
-        if (clean.isBlank()) return@withContext null
-
-        val geminiVoice = voiceOverride ?: getGeminiVoiceName()
-        val promptText = if (isPersian) {
-            "Pronounce this Persian / Dari text clearly and naturally: \"$clean\""
-        } else {
-            buildNeutralPrompt(clean)
-        }
-
-        val requestJson = buildTtsRequestBody(promptText, geminiVoice)
-        val requestBodyStr = requestJson.toString()
-
-        for (model in TTS_MODELS) {
-            try {
-                val url = "https://generativelanguage.googleapis.com/v1beta/models/$model:generateContent?key=$apiKey"
-                val requestBody = requestBodyStr.toRequestBody("application/json; charset=utf-8".toMediaType())
-                val request = Request.Builder()
-                    .url(url)
-                    .post(requestBody)
-                    .build()
-
-                UserProgressManager.getInstance(applicationContext).incrementDailyGeminiRequestsCount()
-                val response = httpClient.newCall(request).execute()
-                val responseCode = response.code
-                val responseBodyStr = response.body?.string().orEmpty()
-
-                if (response.isSuccessful) {
-                    val audioBase64 = extractAudioBase64(responseBodyStr)
-                    if (!audioBase64.isNullOrBlank()) {
-                        val rawAudioBytes = Base64.decode(audioBase64, Base64.DEFAULT)
-                        if (rawAudioBytes.isNotEmpty()) {
-                            val wavBytes = ensureWavBytes(rawAudioBytes)
-                            val key = getVoiceLibraryKey(clean, geminiVoice, PROVIDER_GEMINI)
-                            val libraryFile = File(voiceLibraryDir, "$key.wav")
-                            libraryFile.outputStream().use { it.write(wavBytes) }
-                            Log.d("TtsManager", "Saved Gemini audio to voice library: ${libraryFile.name}")
-                            return@withContext libraryFile
-                        }
-                    }
-                } else {
-                    Log.w("TtsManager", "Gemini TTS $model returned HTTP $responseCode")
-                }
-            } catch (e: Exception) {
-                Log.w("TtsManager", "Error attempting Gemini TTS with $model: ${e.message}")
-            }
-        }
-        return@withContext null
+    ): File? {
+        // Disabled: Azure-only voice playback across the entire app
+        return null
     }
 
     /**
-     * Synthesizes a single segment with dual-provider fallback logic.
+     * Synthesizes a single segment with Azure-only TTS logic:
      * 1) Voice library check FIRST.
-     * 2) Selected provider tried first.
-     * 3) Other provider tried automatically on failure.
-     * 4) If Persian and Gemini cannot synthesize fa-IR, falls back to Azure.
+     * 2) Azure Speech REST API.
+     * 3) Returns null for device TTS fallback.
      */
     suspend fun synthesizeSegment(
         text: String,
@@ -460,53 +411,31 @@ class TtsManager(
         val clean = text.trim()
         if (clean.isBlank()) return null
 
-        val chosenProvider = getChosenVoiceProvider()
         val azureVoice = getAzureVoiceForSegment(isPersian)
-        val geminiVoice = getGeminiVoiceName()
 
         // 1) First check stored audio in voice library
-        val storedFile = findStoredAudioFile(clean, speed, if (chosenProvider == PROVIDER_AZURE) azureVoice else geminiVoice, chosenProvider)
-            ?: findStoredAudioFile(clean, speed, azureVoice, PROVIDER_AZURE)
-            ?: findStoredAudioFile(clean, speed, geminiVoice, PROVIDER_GEMINI)
+        val storedFile = findStoredAudioFile(clean, speed, azureVoice, PROVIDER_AZURE)
+            ?: findStoredAudioFile(clean, speed, azureVoice)
+            ?: findStoredAudioFile(clean, speed)
         if (storedFile != null) {
             return storedFile
         }
 
+        // 2) Azure TTS (German: Conrad/Klara, Persian/Dari: Farid/Dilara per gender setting)
         val azureKey = getEffectiveAzureKey()
-        val geminiKey = getEffectiveApiKey()
-
-        // 2) Dual-provider execution order
-        if (chosenProvider == PROVIDER_AZURE) {
-            // Try Azure first
-            if (azureKey.isNotEmpty()) {
-                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey)
-                if (file != null) return file
-            }
-            // Fallback to Gemini
-            if (geminiKey.isNotEmpty()) {
-                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey)
-                if (file != null) return file
-            }
-        } else {
-            // Try Gemini first
-            if (geminiKey.isNotEmpty()) {
-                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey)
-                if (file != null) return file
-            }
-            // Fallback to Azure (especially critical for fa-IR)
-            if (azureKey.isNotEmpty()) {
-                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey)
-                if (file != null) return file
-            }
+        if (azureKey.isNotEmpty()) {
+            val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey)
+            if (file != null) return file
         }
 
+        // 3) Fallback: returns null -> caller invokes device TTS
         return null
     }
 
     /**
-     * Synthesizes a segment with a specific fixed voice (e.g. speaker A male Conrad/Charon,
-     * speaker B female Klara/Kore) checking cache first, trying chosen provider then other,
-     * saving to permanent voice library. Returns the audio File if synthesized or cached.
+     * Synthesizes a segment with a specific fixed voice (Speaker A Conrad male,
+     * Speaker B Klara female; Persian/Dari Farid/Dilara) checking cache first,
+     * using Azure TTS, and saving to permanent voice library.
      */
     suspend fun synthesizeSegmentWithVoice(
         text: String,
@@ -517,46 +446,28 @@ class TtsManager(
         val clean = text.trim()
         if (clean.isBlank()) return null
 
-        val chosenProvider = getChosenVoiceProvider()
         val azureVoice = if (isPersian) {
             if (isMaleVoice) AZURE_VOICE_FA_FARID else AZURE_VOICE_FA_DILARA
         } else {
             if (isMaleVoice) AZURE_VOICE_CONRAD else AZURE_VOICE_KLARA
         }
-        val geminiVoice = if (isMaleVoice) GEMINI_VOICE_CHARON else GEMINI_VOICE_KORE
 
         // 1) First check stored audio in voice library
-        val storedFile = findStoredAudioFile(clean, speed, if (chosenProvider == PROVIDER_AZURE) azureVoice else geminiVoice, chosenProvider)
-            ?: findStoredAudioFile(clean, speed, azureVoice, PROVIDER_AZURE)
-            ?: findStoredAudioFile(clean, speed, geminiVoice, PROVIDER_GEMINI)
+        val storedFile = findStoredAudioFile(clean, speed, azureVoice, PROVIDER_AZURE)
+            ?: findStoredAudioFile(clean, speed, azureVoice)
+            ?: findStoredAudioFile(clean, speed)
         if (storedFile != null) {
             return storedFile
         }
 
+        // 2) Azure TTS
         val azureKey = getEffectiveAzureKey()
-        val geminiKey = getEffectiveApiKey()
-
-        // 2) Dual-provider execution order
-        if (chosenProvider == PROVIDER_AZURE) {
-            if (azureKey.isNotEmpty()) {
-                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey, voiceOverride = azureVoice)
-                if (file != null) return file
-            }
-            if (geminiKey.isNotEmpty()) {
-                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey, voiceOverride = geminiVoice)
-                if (file != null) return file
-            }
-        } else {
-            if (geminiKey.isNotEmpty()) {
-                val file = synthesizeGeminiAudioToLibrary(clean, isPersian, geminiKey, voiceOverride = geminiVoice)
-                if (file != null) return file
-            }
-            if (azureKey.isNotEmpty()) {
-                val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey, voiceOverride = azureVoice)
-                if (file != null) return file
-            }
+        if (azureKey.isNotEmpty()) {
+            val file = synthesizeAzureAudioToLibrary(clean, isPersian, speed, azureKey, voiceOverride = azureVoice)
+            if (file != null) return file
         }
 
+        // 3) Fallback: returns null -> caller invokes device TTS
         return null
     }
 
@@ -605,10 +516,10 @@ class TtsManager(
             if (germanFile != null) {
                 playedOk = playAudioFileAndWait(germanFile, speed)
             } else {
-                // Fallback to device TTS with Dari toast if no cloud voice is configured
-                val hasAnyCloudKey = getEffectiveAzureKey().isNotEmpty() || getEffectiveApiKey().isNotEmpty()
-                if (!hasAnyCloudKey) {
-                    showToast("کلید صوتی تنظیم نشده است؛ صدا از موتور گفتار گوشی پخش می‌شود.")
+                // Fallback to device TTS with note if Azure voice is unconfigured
+                val hasAzureKey = getEffectiveAzureKey().isNotEmpty()
+                if (!hasAzureKey) {
+                    showToast("کلید صوتی آژور تنظیم نشده است؛ صدا از موتور گفتار گوشی پخش می‌شود.")
                 }
                 playedOk = speakWithDeviceTtsAndWait(german, isPersian = false, speed = speed)
             }
@@ -808,7 +719,7 @@ class TtsManager(
     }
 
     /**
-     * Tests voice with current speed, supporting Azure and Gemini providers.
+     * Tests voice with current speed using Microsoft Azure Speech REST API.
      */
     suspend fun testVoice(
         sampleGerman: String = "Guten Tag! Ich lerne Deutsch.",
@@ -819,85 +730,46 @@ class TtsManager(
         regionOverride: String? = null,
         voiceOverride: String? = null
     ): Result<String> = withContext(Dispatchers.IO) {
-        val provider = providerOverride ?: getChosenVoiceProvider()
         val speedDesc = UserProgressManager.formatSpeedToPersian(speed)
+        val key = keyOverride?.trim()?.ifEmpty { null } ?: getEffectiveAzureKey()
+        val region = regionOverride?.trim()?.ifEmpty { null } ?: getEffectiveAzureRegion()
+        if (key.isBlank()) {
+            return@withContext Result.failure(Exception("کلید API سرویس صوتی آژور (Azure) وارد نشده است. لطفاً کلید اشتراک Speech خود را وارد نمایید."))
+        }
 
-        if (provider == PROVIDER_AZURE) {
-            val key = keyOverride?.trim()?.ifEmpty { null } ?: getEffectiveAzureKey()
-            val region = regionOverride?.trim()?.ifEmpty { null } ?: getEffectiveAzureRegion()
-            if (key.isBlank()) {
-                return@withContext Result.failure(Exception("کلید API سرویس صوتی آژور (Azure) وارد نشده است. لطفاً کلید اشتراک Speech خود را وارد نمایید."))
+        try {
+            // Test German segment with Azure
+            val germanFile = synthesizeAzureAudioToLibrary(
+                text = sampleGerman,
+                isPersian = false,
+                speed = speed,
+                azureKey = key,
+                region = region,
+                voiceOverride = voiceOverride
+            )
+            if (germanFile == null) {
+                return@withContext Result.failure(Exception("خطا در ارتباط با سرویس صوتی آژور. لطفاً کلید و منطقه (Region) را بررسی نمایید."))
             }
 
-            try {
-                // Test German segment
-                val germanFile = synthesizeAzureAudioToLibrary(
-                    text = sampleGerman,
-                    isPersian = false,
-                    speed = speed,
-                    azureKey = key,
-                    region = region,
-                    voiceOverride = voiceOverride
-                )
-                if (germanFile == null) {
-                    return@withContext Result.failure(Exception("خطا در ارتباط با سرویس صوتی آژور. لطفاً کلید و منطقه (Region) را بررسی نمایید."))
-                }
+            // Test Persian segment with Azure
+            val dariFile = synthesizeAzureAudioToLibrary(
+                text = sampleDari,
+                isPersian = true,
+                speed = speed,
+                azureKey = key,
+                region = region,
+                voiceOverride = null
+            )
 
-                // Test Persian segment
-                val dariFile = synthesizeAzureAudioToLibrary(
-                    text = sampleDari,
-                    isPersian = true,
-                    speed = speed,
-                    azureKey = key,
-                    region = region,
-                    voiceOverride = null
-                )
-
-                playAudioFileAndWait(germanFile, speed)
-                if (dariFile != null) {
-                    delay(120)
-                    playAudioFileAndWait(dariFile, speed)
-                }
-
-                return@withContext Result.success("صدای دو زبانهٔ آژور با سرعت $speedDesc با موفقیت پخش شد! ✨")
-            } catch (e: Exception) {
-                return@withContext Result.failure(Exception("خطا در برقراری ارتباط با سرویس صوتی آژور."))
-            }
-        } else {
-            // Test Gemini
-            val key = keyOverride?.trim()?.ifEmpty { null } ?: getEffectiveApiKey()
-            if (key.isBlank()) {
-                return@withContext Result.failure(Exception("کلید API جیمنای تنظیم نشده است. لطفاً ابتدا کلید خود را از Google AI Studio وارد نمایید."))
+            playAudioFileAndWait(germanFile, speed)
+            if (dariFile != null) {
+                delay(120)
+                playAudioFileAndWait(dariFile, speed)
             }
 
-            try {
-                val germanFile = synthesizeGeminiAudioToLibrary(
-                    text = sampleGerman,
-                    isPersian = false,
-                    apiKey = key,
-                    voiceOverride = voiceOverride
-                )
-                if (germanFile == null) {
-                    return@withContext Result.failure(Exception("خطا در برقراری ارتباط با سرور جیمنای؛ لطفاً کلید API را بررسی نمایید."))
-                }
-
-                val dariFile = synthesizeGeminiAudioToLibrary(
-                    text = sampleDari,
-                    isPersian = true,
-                    apiKey = key,
-                    voiceOverride = voiceOverride
-                )
-
-                playAudioFileAndWait(germanFile, speed)
-                if (dariFile != null) {
-                    delay(120)
-                    playAudioFileAndWait(dariFile, speed)
-                }
-
-                return@withContext Result.success("صدای جیمنای با سرعت $speedDesc با موفقیت پخش شد! ✨")
-            } catch (e: Exception) {
-                return@withContext Result.failure(Exception("خطا در اتصال به اینترنت یا سرور جیمنای."))
-            }
+            return@withContext Result.success("صدای دو زبانهٔ آژور با سرعت $speedDesc با موفقیت پخش شد! ✨")
+        } catch (e: Exception) {
+            return@withContext Result.failure(Exception("خطا در برقراری ارتباط با سرویس صوتی آژور."))
         }
     }
 
@@ -906,12 +778,8 @@ class TtsManager(
         speed: Float = getEffectiveSpeed(),
         keyOverride: String? = null
     ): Result<String> {
-        return testVoice(
-            sampleGerman = sampleText,
-            speed = speed,
-            providerOverride = PROVIDER_GEMINI,
-            keyOverride = keyOverride
-        )
+        // Gemini TTS is disabled app-wide; routes to Azure testVoice
+        return testVoice(sampleGerman = sampleText, speed = speed)
     }
 
     suspend fun testGeminiVoice(
@@ -923,59 +791,6 @@ class TtsManager(
         return testGeminiVoice(sampleText, speed, keyOverride)
     }
 
-    private fun buildTtsRequestBody(promptText: String, voiceName: String = DEFAULT_VOICE_NAME): JSONObject {
-        return JSONObject().apply {
-            put("contents", JSONArray().apply {
-                put(JSONObject().apply {
-                    put("parts", JSONArray().apply {
-                        put(JSONObject().apply {
-                            put("text", promptText)
-                        })
-                    })
-                })
-            })
-            put("generationConfig", JSONObject().apply {
-                put("responseModalities", JSONArray().apply {
-                    put("AUDIO")
-                })
-                put("speechConfig", JSONObject().apply {
-                    put("voiceConfig", JSONObject().apply {
-                        put("prebuiltVoiceConfig", JSONObject().apply {
-                            put("voiceName", voiceName)
-                        })
-                    })
-                })
-            })
-        }
-    }
-
-    private fun extractAudioBase64(responseBodyStr: String): String? {
-        if (responseBodyStr.isBlank()) return null
-        return try {
-            val respObj = JSONObject(responseBodyStr)
-            val candidates = respObj.optJSONArray("candidates") ?: return null
-            if (candidates.length() == 0) return null
-
-            val firstCand = candidates.getJSONObject(0)
-            val content = firstCand.optJSONObject("content") ?: return null
-            val parts = content.optJSONArray("parts") ?: return null
-            if (parts.length() == 0) return null
-
-            for (i in 0 until parts.length()) {
-                val p = parts.getJSONObject(i)
-                val inlineData = p.optJSONObject("inlineData")
-                if (inlineData != null) {
-                    val data = inlineData.optString("data", "")
-                    if (data.isNotBlank()) {
-                        return data
-                    }
-                }
-            }
-            null
-        } catch (e: Exception) {
-            null
-        }
-    }
 
     private fun speakWithDeviceTts(speechText: String, isPersian: Boolean = false, speed: Float) {
         stopAudio()
