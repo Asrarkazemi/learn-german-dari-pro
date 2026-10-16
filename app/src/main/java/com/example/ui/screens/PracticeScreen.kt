@@ -239,7 +239,8 @@ private fun LessonExercisesSection(
                     },
                     onPlayAudio = onPlayAudio,
                     nextButtonText = if (safeIndex < exercises.size - 1) "سوال بعدی" else "پایان و مشاهدهٔ نتیجه",
-                    modifier = Modifier.padding(top = 4.dp)
+                    modifier = Modifier.padding(top = 4.dp),
+                    lessonVocabulary = currentLesson.vocabulary
                 )
             }
         } else {

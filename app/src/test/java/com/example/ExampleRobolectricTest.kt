@@ -6,6 +6,7 @@ import com.example.data.model.LessonData
 import com.example.data.repository.BuiltInCourseData
 import com.example.ui.consumeTaps
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -1305,6 +1306,158 @@ class ExampleRobolectricTest {
 
         val freshManager = com.example.data.storage.UserProgressManager(context)
         org.junit.Assert.assertNull(freshManager.getSavedReadingPosition())
+    }
+
+    @Test
+    fun `verify Fix V dialogue auto-save duplicate prevention and full line preservation`() {
+        kotlinx.coroutines.runBlocking {
+            val context = ApplicationProvider.getApplicationContext<Context>()
+            val repo = com.example.data.repository.SavedDialoguesRepository.getInstance(context)
+
+            val sampleLines = listOf(
+                com.example.data.model.DialogueMakerLine(
+                    speaker = "A",
+                    isSpeakerA = true,
+                    german = "Hallo, wie geht es dir?",
+                    pronunciation = "هالو، وی گِت اِس دیر؟",
+                    translationDari = "سلام، چطور هستی؟"
+                ),
+                com.example.data.model.DialogueMakerLine(
+                    speaker = "B",
+                    isSpeakerA = false,
+                    german = "Mir geht es gut, danke!",
+                    pronunciation = "میر گِت اِس گوت، دانکه!",
+                    translationDari = "من خوب هستم، تشکر!"
+                )
+            )
+
+            // Initial duplicate check should be false
+            val initialHasDuplicate = repo.hasIdenticalDialogue(sampleLines)
+
+            // Save dialogue 1
+            val dialogue1 = com.example.data.model.SavedDialogue(
+                id = "test_dialogue_v1",
+                topic = "موضوع اول",
+                createdAtFormatted = "2026/10/16 - 12:00",
+                lines = sampleLines
+            )
+            repo.saveDialogue(dialogue1)
+
+            // hasIdenticalDialogue should now be true
+            assertTrue(repo.hasIdenticalDialogue(sampleLines))
+
+            // Saving a second dialogue with identical lines but different id must NOT duplicate
+            val dialogue2 = com.example.data.model.SavedDialogue(
+                id = "test_dialogue_v2",
+                topic = "موضوع اول دوباره",
+                createdAtFormatted = "2026/10/16 - 12:01",
+                lines = sampleLines
+            )
+            val initialCount = repo.dialoguesFlow.value.size
+            repo.saveDialogue(dialogue2)
+            val finalCount = repo.dialoguesFlow.value.size
+            assertEquals("Identical dialogue must not create a duplicate in library", initialCount, finalCount)
+
+            // Verify all lines preserved on the saved dialogue
+            val savedItem = repo.dialoguesFlow.value.first { it.lines.first().german == "Hallo, wie geht es dir?" }
+            assertEquals("موضوع اول", savedItem.topic)
+            assertEquals(2, savedItem.lines.size)
+            assertEquals("A", savedItem.lines[0].speaker)
+            assertTrue(savedItem.lines[0].isSpeakerA)
+            assertEquals("Hallo, wie geht es dir?", savedItem.lines[0].german)
+            assertEquals("هالو، وی گِت اِس دیر؟", savedItem.lines[0].pronunciation)
+            assertEquals("سلام، چطور هستی؟", savedItem.lines[0].translationDari)
+
+            // Cleanup
+            repo.deleteDialogue("test_dialogue_v1")
+        }
+    }
+
+    @Test
+    fun `verify Fix V article-quiz bare noun stripping and real Dari meaning lookup`() {
+        val vocabList = listOf(
+            com.example.data.model.VocabularyItem(
+                article = "der",
+                word = "Hund",
+                pronunciationPersianScript = "هوند",
+                meaningDari = "سگ (مذکر: der)"
+            ),
+            com.example.data.model.VocabularyItem(
+                article = "die",
+                word = "Katze",
+                pronunciationPersianScript = "کاتسه",
+                meaningDari = "پشک / گربه (مؤنث: die)"
+            ),
+            com.example.data.model.VocabularyItem(
+                article = "das",
+                word = "Buch",
+                pronunciationPersianScript = "بوخ",
+                meaningDari = "کتاب (خنثی: das)"
+            ),
+            com.example.data.model.VocabularyItem(
+                article = "der",
+                word = "Tisch",
+                pronunciationPersianScript = "تیش",
+                meaningDari = "میز (مذکر: der)"
+            )
+        )
+
+        // 1. Verify stripLeadingArticle
+        assertEquals("Hund", com.example.ui.components.stripLeadingArticle("der Hund"))
+        assertEquals("Hund", com.example.ui.components.stripLeadingArticle("Der Hund"))
+        assertEquals("Katze", com.example.ui.components.stripLeadingArticle("die Katze"))
+        assertEquals("Katze", com.example.ui.components.stripLeadingArticle("Die Katze"))
+        assertEquals("Buch", com.example.ui.components.stripLeadingArticle("das Buch"))
+        assertEquals("Buch", com.example.ui.components.stripLeadingArticle("Das Buch"))
+        assertEquals("Hund", com.example.ui.components.stripLeadingArticle("Hund"))
+
+        // 2. Verify isArticleQuiz identification
+        val articleEx = com.example.data.model.ExerciseItem(
+            type = "multiple-choice",
+            question = "der Hund",
+            pronunciation = "دِر هوند",
+            translationDari = "der Hund",
+            options = listOf("der", "die", "das"),
+            correctAnswer = "der",
+            explanationDari = "واژه Hund مذکر است."
+        )
+        assertTrue(com.example.ui.components.isArticleQuiz(articleEx))
+
+        val nonArticleEx = com.example.data.model.ExerciseItem(
+            type = "multiple-choice",
+            question = "Wie heißt das auf Deutsch?",
+            pronunciation = "وی هایست داس",
+            translationDari = "این به آلمانی چیست؟",
+            options = listOf("این به آلمانی چیست؟", "ساعت چند است؟", "کجا زندگی می‌کنید؟", "قیمت این چند است؟"),
+            correctAnswer = "این به آلمانی چیست؟",
+            explanationDari = "پرسش نام شی"
+        )
+        assertFalse(com.example.ui.components.isArticleQuiz(nonArticleEx))
+
+        // 3. Verify real Dari meaning lookup from lesson vocabulary
+        val meaningHund = com.example.ui.components.findMatchingMeaning(vocabList, "Hund")
+        assertEquals("سگ (مذکر: der)", meaningHund)
+
+        val meaningFromFull = com.example.ui.components.findMatchingMeaning(vocabList, "der Hund")
+        assertEquals("سگ (مذکر: der)", meaningFromFull)
+
+        val meaningKatze = com.example.ui.components.findMatchingMeaning(vocabList, "die Katze")
+        assertEquals("پشک / گربه (مؤنث: die)", meaningKatze)
+
+        // 4. Verify that missing vocabulary entry or placeholder returns null (omitted/hidden)
+        val missingMeaning = com.example.ui.components.findMatchingMeaning(vocabList, "Kugelschreiber")
+        org.junit.Assert.assertNull("Missing word should return null meaning", missingMeaning)
+
+        val dummyVocab = listOf(
+            com.example.data.model.VocabularyItem(
+                article = "der",
+                word = "Stift",
+                pronunciationPersianScript = "شتیفت",
+                meaningDari = "Stift" // repeated German word
+            )
+        )
+        val repeatedGerman = com.example.ui.components.findMatchingMeaning(dummyVocab, "Stift")
+        org.junit.Assert.assertNull("Repeated German word must be rejected", repeatedGerman)
     }
 }
 

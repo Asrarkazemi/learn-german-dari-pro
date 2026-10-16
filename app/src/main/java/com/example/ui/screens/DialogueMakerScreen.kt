@@ -259,6 +259,22 @@ fun DialogueMakerScreen(
             result.onSuccess { generatedLines ->
                 lines = generatedLines
                 errorMessage = null
+                if (generatedLines.isNotEmpty()) {
+                    // Fix V (1): Auto-save to conversation library as soon as generated
+                    if (!savedRepo.hasIdenticalDialogue(generatedLines)) {
+                        val topicTitle = topic.ifBlank { "مکالمه آلمانی" }
+                        val nowStr = SimpleDateFormat("yyyy/MM/dd - HH:mm", Locale.getDefault()).format(Date())
+                        val dialogue = SavedDialogue(
+                            id = UUID.randomUUID().toString(),
+                            topic = topicTitle,
+                            createdAtFormatted = nowStr,
+                            timestamp = System.currentTimeMillis(),
+                            lines = generatedLines
+                        )
+                        savedRepo.saveDialogue(dialogue, emptyMap())
+                    }
+                    isSaved = true
+                }
             }.onFailure { err ->
                 errorMessage = err.message ?: "خطا در ساخت مکالمه."
             }
@@ -266,8 +282,13 @@ fun DialogueMakerScreen(
     }
 
     fun saveCurrentDialogue() {
-        if (lines.isEmpty() || isSaved) return
+        if (lines.isEmpty()) return
         coroutineScope.launch {
+            if (savedRepo.hasIdenticalDialogue(lines)) {
+                isSaved = true
+                Toast.makeText(context, "این مکالمه قبلاً در کتابخانه ذخیره شده است.", Toast.LENGTH_SHORT).show()
+                return@launch
+            }
             val topic = topicInput.trim().ifBlank { "مکالمه آلمانی" }
             val nowStr = SimpleDateFormat("yyyy/MM/dd - HH:mm", Locale.getDefault()).format(Date())
             val dialogue = SavedDialogue(

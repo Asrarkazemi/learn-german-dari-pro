@@ -61,11 +61,52 @@ class SavedDialoguesRepository private constructor(private val context: Context)
         return null
     }
 
+    fun hasIdenticalDialogue(lines: List<com.example.data.model.DialogueMakerLine>): Boolean {
+        if (lines.isEmpty()) return false
+        return _dialoguesFlow.value.any { saved ->
+            if (saved.lines.size != lines.size) return@any false
+            saved.lines.indices.all { i ->
+                val a = saved.lines[i]
+                val b = lines[i]
+                a.german.trim() == b.german.trim() &&
+                a.translationDari.trim() == b.translationDari.trim() &&
+                a.pronunciation.trim() == b.pronunciation.trim() &&
+                a.isSpeakerA == b.isSpeakerA
+            }
+        }
+    }
+
     suspend fun saveDialogue(
         dialogue: SavedDialogue,
         lineAudioFiles: Map<Int, File> = emptyMap()
     ): Result<Unit> = withContext(Dispatchers.IO) {
         try {
+            // Check for identical dialogue using hasIdenticalDialogue to prevent duplicates
+            if (hasIdenticalDialogue(dialogue.lines)) {
+                val existing = _dialoguesFlow.value.firstOrNull { saved ->
+                    saved.lines.size == dialogue.lines.size &&
+                    saved.lines.indices.all { i ->
+                        val a = saved.lines[i]
+                        val b = dialogue.lines[i]
+                        a.german.trim() == b.german.trim() &&
+                        a.translationDari.trim() == b.translationDari.trim() &&
+                        a.pronunciation.trim() == b.pronunciation.trim() &&
+                        a.isSpeakerA == b.isSpeakerA
+                    }
+                }
+                if (existing != null && lineAudioFiles.isNotEmpty()) {
+                    val dir = getDialogueDir(existing.id)
+                    for ((index, srcFile) in lineAudioFiles) {
+                        if (srcFile.exists() && srcFile.length() > 0) {
+                            val ext = srcFile.extension.ifBlank { "mp3" }
+                            val targetFile = File(dir, "line_$index.$ext")
+                            srcFile.copyTo(targetFile, overwrite = true)
+                        }
+                    }
+                }
+                return@withContext Result.success(Unit)
+            }
+
             val dir = getDialogueDir(dialogue.id)
             val jsonFile = File(dir, "dialogue.json")
             jsonFile.writeText(dialogue.toJsonObject().toString(2))

@@ -53,6 +53,9 @@ import com.example.data.model.ExerciseItem
 import com.example.data.model.LessonData
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
+import com.example.ui.components.findMatchingMeaning
+import com.example.ui.components.isArticleQuiz
+import com.example.ui.components.stripLeadingArticle
 import com.example.ui.theme.AccentAmber
 import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SuccessGreen
@@ -109,6 +112,7 @@ fun QuizScreen(
             mistakes = mistakesList,
             onRestart = { restartQuiz() },
             onPlayAudio = onPlayAudio,
+            allLessons = allLessons,
             modifier = modifier
         )
     } else {
@@ -160,6 +164,13 @@ fun QuizScreen(
                 item {
                     var answeredThisCorrectly by remember(currentExercise) { mutableStateOf<Boolean?>(null) }
 
+                    val currentLesson = remember(currentExercise, allLessons) {
+                        allLessons.find { lesson ->
+                            lesson.exercises.any { it.question == currentExercise.question && it.correctAnswer == currentExercise.correctAnswer }
+                        }
+                    }
+                    val currentLessonVocab = currentLesson?.vocabulary ?: remember(allLessons) { allLessons.flatMap { it.vocabulary } }
+
                     Spacer(modifier = Modifier.height(6.dp))
                     ExactExerciseQuestionView(
                         exercise = currentExercise,
@@ -189,7 +200,8 @@ fun QuizScreen(
                         },
                         onPlayAudio = onPlayAudio,
                         nextButtonText = if (currentQIndex < quizQuestions.size - 1) "سوال بعدی" else "مشاهده کارنامه نهایی",
-                        modifier = Modifier.padding(top = 4.dp)
+                        modifier = Modifier.padding(top = 4.dp),
+                        lessonVocabulary = currentLessonVocab
                     )
                 }
             }
@@ -204,6 +216,7 @@ private fun QuizCompletedScreen(
     mistakes: List<QuizMistake>,
     onRestart: () -> Unit,
     onPlayAudio: (String, Boolean) -> Unit,
+    allLessons: List<LessonData> = emptyList(),
     modifier: Modifier = Modifier
 ) {
     val percentage = if (total > 0) (score.toFloat() / total.toFloat() * 100).toInt() else 0
@@ -310,6 +323,14 @@ private fun QuizCompletedScreen(
         // Mistakes details with explanation and audio
         items(mistakes) { mistake ->
             val ex = mistake.exercise
+            val isArticle = isArticleQuiz(ex)
+            val displayedQuestion = if (isArticle) stripLeadingArticle(ex.question) else ex.question
+            val exLesson = allLessons.find { l -> l.exercises.any { it.question == ex.question && it.correctAnswer == ex.correctAnswer } }
+            val vocabList = exLesson?.vocabulary ?: allLessons.flatMap { it.vocabulary }
+            val displayedMeaning = if (isArticle) {
+                findMatchingMeaning(vocabList, displayedQuestion)
+            } else ex.translationDari.trim().takeIf { it.isNotBlank() }
+
             Card(
                 modifier = Modifier.fillMaxWidth(),
                 shape = RoundedCornerShape(16.dp),
@@ -324,7 +345,7 @@ private fun QuizCompletedScreen(
                     ) {
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                             Text(
-                                text = ex.question,
+                                text = displayedQuestion,
                                 fontWeight = FontWeight.Bold,
                                 fontSize = 16.sp,
                                 color = MaterialTheme.colorScheme.primary,
@@ -333,8 +354,8 @@ private fun QuizCompletedScreen(
                         }
 
                         AudioSpeechButtons(
-                            textToSpeak = ex.question,
-                            translationDari = ex.translationDari,
+                            textToSpeak = displayedQuestion,
+                            translationDari = displayedMeaning ?: "",
                             onPlayAudio = onPlayAudio,
                             size = 34
                         )
@@ -342,7 +363,9 @@ private fun QuizCompletedScreen(
 
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(text = "تلفظ: ${ex.pronunciation}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
-                    Text(text = "معنی: ${ex.translationDari}", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                    if (!displayedMeaning.isNullOrBlank()) {
+                        Text(text = "معنی: $displayedMeaning", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurface)
+                    }
 
                     Spacer(modifier = Modifier.height(10.dp))
 

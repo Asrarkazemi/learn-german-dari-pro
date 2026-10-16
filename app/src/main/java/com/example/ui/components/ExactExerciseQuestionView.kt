@@ -59,6 +59,8 @@ import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.ExerciseItem
+import com.example.data.model.VocabularyItem
+import com.example.data.repository.UnifiedCourseRepository
 import com.example.data.storage.UserProgressManager
 import com.example.ui.consumeTaps
 import com.example.ui.theme.AccentAmber
@@ -66,6 +68,54 @@ import com.example.ui.theme.ErrorRed
 import com.example.ui.theme.SuccessGreen
 import kotlinx.coroutines.launch
 import kotlin.math.roundToInt
+
+fun isArticleQuiz(exercise: ExerciseItem): Boolean {
+    val cleanAns = exercise.correctAnswer.trim().lowercase()
+    val cleanOpts = exercise.options.map { it.trim().lowercase() }
+    val hasAllThree = cleanOpts.contains("der") && cleanOpts.contains("die") && cleanOpts.contains("das")
+    val isArticleAnswer = cleanAns in listOf("der", "die", "das")
+    val hasArticleOptions = cleanOpts.count { it in listOf("der", "die", "das") } >= 2
+    return hasAllThree || (isArticleAnswer && hasArticleOptions)
+}
+
+fun stripLeadingArticle(question: String): String {
+    return question.trim().replaceFirst(Regex("^(?i)(der|die|das)\\s+"), "").trim()
+}
+
+fun findMatchingMeaning(vocabList: List<VocabularyItem>, questionText: String): String? {
+    val cleanText = stripLeadingArticle(questionText).trim().trim('.', '!', '?', ',', ':', ';', '"', '\'')
+    if (cleanText.isBlank()) return null
+
+    // 1. Exact match on cleanText
+    var match = vocabList.firstOrNull { v ->
+        val vWord = stripLeadingArticle(v.word)
+        vWord.equals(cleanText, ignoreCase = true)
+    }
+
+    // 2. If not found, match against individual tokens (e.g. if question has multiple words or blanks)
+    if (match == null) {
+        val tokens = cleanText.split(Regex("\\s+"))
+            .map { it.trim('.', '!', '?', ',', ':', ';', '"', '\'').removePrefix("___") }
+            .filter { it.isNotBlank() && it.length > 1 }
+
+        match = vocabList.firstOrNull { v ->
+            val vWord = stripLeadingArticle(v.word)
+            tokens.any { token -> vWord.equals(token, ignoreCase = true) }
+        }
+    }
+
+    val meaning = match?.meaningDari?.trim() ?: return null
+    if (meaning.isBlank()) return null
+    // Must NOT be the German word repeated
+    if (meaning.equals(cleanText, ignoreCase = true) || meaning.equals(match.word, ignoreCase = true)) return null
+    // Must NOT be a transliteration/pronunciation
+    if (match.pronunciationPersianScript.isNotBlank() && meaning.equals(match.pronunciationPersianScript.trim(), ignoreCase = true)) return null
+    // Must NOT be a placeholder
+    val lower = meaning.lowercase()
+    if (lower in listOf("---", "...", "null", "placeholder", "n/a", "none", "معنی")) return null
+
+    return meaning
+}
 
 @Composable
 fun ExactExerciseQuestionView(
@@ -76,7 +126,8 @@ fun ExactExerciseQuestionView(
     onNext: () -> Unit,
     onPlayAudio: (String, Boolean) -> Unit,
     modifier: Modifier = Modifier,
-    nextButtonText: String = "بعدی"
+    nextButtonText: String = "بعدی",
+    lessonVocabulary: List<VocabularyItem> = emptyList()
 ) {
     // Exact interaction state: starts BLANK for each question
     var selectedOption by remember(exercise, questionNumber) { mutableStateOf<String?>(null) }
@@ -101,6 +152,31 @@ fun ExactExerciseQuestionView(
         nextButtonText
     } else {
         "سؤال بعدی"
+    }
+
+    // Fix V (2): Article-quiz bare noun and real Dari meaning resolution
+    val isArticle = remember(exercise) { isArticleQuiz(exercise) }
+    val displayedQuestion = remember(exercise, isArticle) {
+        if (isArticle) stripLeadingArticle(exercise.question) else exercise.question
+    }
+
+    val resolvedVocab = remember(lessonVocabulary, exercise) {
+        if (lessonVocabulary.isNotEmpty()) {
+            lessonVocabulary
+        } else {
+            val courseRepo = UnifiedCourseRepository.getInstance(context)
+            val all = courseRepo.lessonsFlow.value
+            val matchedLesson = all.find { l -> l.exercises.any { it.question == exercise.question && it.correctAnswer == exercise.correctAnswer } }
+            matchedLesson?.vocabulary ?: all.flatMap { it.vocabulary }
+        }
+    }
+
+    val displayedMeaning = remember(exercise, isArticle, resolvedVocab, displayedQuestion) {
+        if (isArticle) {
+            findMatchingMeaning(resolvedVocab, displayedQuestion)
+        } else {
+            exercise.translationDari.trim().takeIf { it.isNotBlank() }
+        }
     }
 
     Column(
@@ -151,8 +227,8 @@ fun ExactExerciseQuestionView(
 
                     // Audio buttons in their own non-overlapping area
                     AudioSpeechButtons(
-                        textToSpeak = exercise.question,
-                        translationDari = exercise.translationDari,
+                        textToSpeak = displayedQuestion,
+                        translationDari = displayedMeaning ?: "",
                         onPlayAudio = onPlayAudio,
                         size = 36
                     )
@@ -173,7 +249,7 @@ fun ExactExerciseQuestionView(
                         // Question text (German in LTR)
                         CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
                             Text(
-                                text = exercise.question,
+                                text = displayedQuestion,
                                 style = MaterialTheme.typography.titleLarge.copy(
                                     fontWeight = FontWeight.Bold,
                                     color = MaterialTheme.colorScheme.primary
@@ -193,10 +269,10 @@ fun ExactExerciseQuestionView(
                             )
                         }
 
-                        if (exercise.translationDari.isNotBlank()) {
+                        if (!displayedMeaning.isNullOrBlank()) {
                             Spacer(modifier = Modifier.height(3.dp))
                             Text(
-                                text = "معنی: ${exercise.translationDari}",
+                                text = "معنی: $displayedMeaning",
                                 style = MaterialTheme.typography.bodyMedium,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                                 textAlign = TextAlign.Center

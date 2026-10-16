@@ -1553,7 +1553,8 @@ private fun LessonExercisesTab(
                 },
                 onPlayAudio = onPlayAudio,
                 nextButtonText = if (safeIndex < exercises.size - 1) "سوال بعدی" else "مشاهده نتیجه",
-                modifier = Modifier.padding(top = 4.dp)
+                modifier = Modifier.padding(top = 4.dp),
+                lessonVocabulary = currentLesson.vocabulary
             )
 
             // Feature 1: Three new runtime-generated exercise modes «تمرین‌های تازه»
