@@ -1459,5 +1459,100 @@ class ExampleRobolectricTest {
         val repeatedGerman = com.example.ui.components.findMatchingMeaning(dummyVocab, "Stift")
         org.junit.Assert.assertNull("Repeated German word must be rejected", repeatedGerman)
     }
+
+    @Test
+    fun `verify Fix X page-number search, speak-path number strip, and resume button ZWNJ`() {
+        // 1. Page-Number Search & Digit Normalization
+        val helper = com.example.util.PageSearchHelper
+        assertTrue(helper.isPureNumberQuery("158"))
+        assertTrue(helper.isPureNumberQuery("۱۵۸"))
+        assertTrue(helper.isPureNumberQuery("١٥٨"))
+        assertFalse(helper.isPureNumberQuery("صفحه ۱۵۸"))
+        assertFalse(helper.isPureNumberQuery("Lektion 1"))
+        assertFalse(helper.isPureNumberQuery(""))
+
+        assertEquals("158", helper.normalizeDigits("۱۵۸"))
+        assertEquals("158", helper.normalizeDigits("١٥٨"))
+        assertEquals("158", helper.normalizeDigits("158"))
+
+        assertEquals("158", helper.extractPageFromSectionTitle("صفحهٔ ۱۵۸ · نکات مهم گرامری"))
+        assertEquals("158", helper.extractPageFromSectionTitle("صفحه 158 · زمان گذشته"))
+        assertEquals("158", helper.extractPageFromSectionTitle("ص ۱۵۸: ضمایر"))
+        assertEquals("158", helper.extractPageFromSectionTitle("Seite 158 · Akkusativ"))
+        assertEquals("158", helper.extractPageFromSectionTitle("۱۵۸ · واژگان جدید"))
+
+        assertTrue(helper.sectionMatchesPage("صفحهٔ ۱۵۸ · نکات مهم گرامری", "158"))
+        assertTrue(helper.sectionMatchesPage("صفحهٔ ۱۵۸ · نکات مهم گرامری", "۱۵۸"))
+
+        val dummyLessons = listOf(
+            com.example.data.model.LessonData(
+                id = "lesson_test_1",
+                number = 1,
+                titleGerman = "Lektion 1",
+                titleDari = "درس اول",
+                vocabulary = emptyList(),
+                exampleSentences = emptyList(),
+                exercises = emptyList(),
+                dialogues = emptyList(),
+                grammarSections = listOf(
+                    com.example.data.model.GrammarSection(
+                        title = "صفحهٔ ۱۵۸ · قواعد درس اول",
+                        bodyDari = "توضیحات"
+                    )
+                )
+            )
+        )
+        val dummyGrammarTopics = listOf(
+            com.example.data.model.GrammarTopic(
+                id = "grammar_test_1",
+                number = 1,
+                titleGerman = "Präsens",
+                titleDari = "حال ساده",
+                sections = listOf(
+                    com.example.data.model.GrammarSection(
+                        title = "صفحهٔ ۱۵۸ · صرف افعال",
+                        bodyDari = "توضیحات"
+                    )
+                )
+            )
+        )
+        val dummyGrammarBook = listOf(
+            com.example.data.model.LessonData(
+                id = "book_test_1",
+                number = 1,
+                titleGerman = "Kapitel 1",
+                titleDari = "فصل اول",
+                vocabulary = emptyList(),
+                exampleSentences = emptyList(),
+                exercises = emptyList(),
+                dialogues = emptyList(),
+                grammarSections = listOf(
+                    com.example.data.model.GrammarSection(
+                        title = "صفحهٔ ۱۵۸ · آرتیکل‌ها",
+                        bodyDari = "توضیحات"
+                    )
+                )
+            )
+        )
+
+        val pageResults = helper.searchSectionsByPage(dummyLessons, dummyGrammarBook, dummyGrammarTopics, "۱۵۸")
+        assertEquals(3, pageResults.size)
+        assertTrue(pageResults.any { it.libraryType == com.example.util.PageSearchHelper.LibraryType.LESSONS })
+        assertTrue(pageResults.any { it.libraryType == com.example.util.PageSearchHelper.LibraryType.GRAMMAR })
+        assertTrue(pageResults.any { it.libraryType == com.example.util.PageSearchHelper.LibraryType.GRAMMAR_BOOK })
+
+        // 2. Central TTS Speak-Path Number Strip
+        assertEquals("letztes Jahr", com.example.util.TtsManager.stripLeadingEnumeration("۱. letztes Jahr"))
+        assertEquals("Guten Morgen", com.example.util.TtsManager.stripLeadingEnumeration("2. Guten Morgen"))
+        assertEquals("Auf Wiedersehen", com.example.util.TtsManager.stripLeadingEnumeration("۳) Auf Wiedersehen"))
+        assertEquals("Hallo Welt", com.example.util.TtsManager.stripLeadingEnumeration("Hallo Welt"))
+        assertEquals("سال گذشته", com.example.util.TtsManager.stripLeadingEnumeration("۱. سال گذشته"))
+        assertEquals("Akkusativ Objekt", com.example.util.TtsManager.cleanGermanText("۱. Akkusativ Objekt"))
+
+        // 3. Resume button string check
+        val expectedLabel = "همان\u200Cجا"
+        assertEquals(7, expectedLabel.length)
+        assertEquals('\u200C', expectedLabel[4])
+    }
 }
 

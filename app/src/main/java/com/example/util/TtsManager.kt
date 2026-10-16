@@ -408,7 +408,7 @@ class TtsManager(
         isPersian: Boolean,
         speed: Float
     ): File? {
-        val clean = text.trim()
+        val clean = stripLeadingEnumeration(text).trim()
         if (clean.isBlank()) return null
 
         val azureVoice = getAzureVoiceForSegment(isPersian)
@@ -443,7 +443,7 @@ class TtsManager(
         speed: Float,
         isMaleVoice: Boolean
     ): File? {
-        val clean = text.trim()
+        val clean = stripLeadingEnumeration(text).trim()
         if (clean.isBlank()) return null
 
         val azureVoice = if (isPersian) {
@@ -549,7 +549,7 @@ class TtsManager(
         isPersian: Boolean,
         speed: Float
     ): Boolean {
-        val clean = text.trim()
+        val clean = stripLeadingEnumeration(text).trim()
         if (clean.isBlank()) return false
 
         val file = synthesizeSegment(clean, isPersian, speed)
@@ -565,41 +565,43 @@ class TtsManager(
      * Parses input text into German segment and optional Dari translation.
      */
     fun parseGermanAndDari(text: String, explicitDari: String?): Pair<String, String?> {
-        if (!explicitDari.isNullOrBlank()) {
-            return Pair(cleanGermanText(text), explicitDari.trim())
+        val strippedText = stripLeadingEnumeration(text)
+        val strippedExplicitDari = explicitDari?.let { stripLeadingEnumeration(it).trim().ifEmpty { null } }
+        if (!strippedExplicitDari.isNullOrBlank()) {
+            return Pair(cleanGermanText(strippedText), strippedExplicitDari.trim())
         }
 
         // Check if text has ⟦Dari translation⟧
-        val bracketMatch = Regex("""⟦(.*?)⟧""").find(text)
+        val bracketMatch = Regex("""⟦(.*?)⟧""").find(strippedText)
         if (bracketMatch != null) {
-            val dari = bracketMatch.groupValues[1].trim()
-            val german = cleanGermanText(text.replace(Regex("""⟦(.*?)⟧"""), "").trim())
+            val dari = stripLeadingEnumeration(bracketMatch.groupValues[1].trim())
+            val german = cleanGermanText(strippedText.replace(Regex("""⟦(.*?)⟧"""), "").trim())
             if (german.isNotEmpty() && dari.isNotEmpty()) {
                 return Pair(german, dari)
             }
         }
 
         // Check if text has (Dari translation)
-        val parenMatch = Regex("""\(([\u0600-\u06FF\s.,!?]+)\)""").find(text)
+        val parenMatch = Regex("""\(([\u0600-\u06FF\s.,!?]+)\)""").find(strippedText)
         if (parenMatch != null) {
-            val dari = parenMatch.groupValues[1].trim()
-            val german = cleanGermanText(text.substring(0, parenMatch.range.first).trim())
+            val dari = stripLeadingEnumeration(parenMatch.groupValues[1].trim())
+            val german = cleanGermanText(strippedText.substring(0, parenMatch.range.first).trim())
             if (german.isNotEmpty() && dari.isNotEmpty()) {
                 return Pair(german, dari)
             }
         }
 
         // Check if text has "German | Dari"
-        if (text.contains("|")) {
-            val parts = text.split("|").map { it.trim() }
+        if (strippedText.contains("|")) {
+            val parts = strippedText.split("|").map { it.trim() }
             val germanPart = parts.firstOrNull { it.any { c -> c in 'a'..'z' || c in 'A'..'Z' } }
             val dariPart = parts.firstOrNull { it.any { c -> c in '\u0600'..'\u06FF' } }
             if (germanPart != null && dariPart != null) {
-                return Pair(cleanGermanText(germanPart), dariPart)
+                return Pair(cleanGermanText(germanPart), stripLeadingEnumeration(dariPart))
             }
         }
 
-        return Pair(cleanGermanText(text), null)
+        return Pair(cleanGermanText(strippedText), null)
     }
 
     /**
@@ -793,6 +795,8 @@ class TtsManager(
 
 
     private fun speakWithDeviceTts(speechText: String, isPersian: Boolean = false, speed: Float) {
+        val cleanSpeech = stripLeadingEnumeration(speechText).trim()
+        if (cleanSpeech.isBlank()) return
         stopAudio()
         if (!isInitialized) {
             showToast("موتور صوتی گوشی هنوز آماده نشده است.")
@@ -827,7 +831,7 @@ class TtsManager(
             putFloat("speechRate", speed)
             putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, "device_tts_${System.currentTimeMillis()}")
         }
-        tts?.speak(speechText, TextToSpeech.QUEUE_FLUSH, params, "device_tts_${System.currentTimeMillis()}")
+        tts?.speak(cleanSpeech, TextToSpeech.QUEUE_FLUSH, params, "device_tts_${System.currentTimeMillis()}")
     }
 
     private fun showToast(message: String) {
@@ -949,6 +953,9 @@ class TtsManager(
         if (!isInitialized) return@withContext false
         if (!isPersian && !isGermanSupported) return@withContext false
 
+        val cleanSpeech = stripLeadingEnumeration(speechText).trim()
+        if (cleanSpeech.isBlank()) return@withContext false
+
         suspendCancellableCoroutine { cont ->
             val utteranceId = "device_seq_${System.currentTimeMillis()}_${(0..999).random()}"
             ttsInstance.setSpeechRate(speed)
@@ -978,7 +985,7 @@ class TtsManager(
                 putFloat("speechRate", speed)
                 putString(TextToSpeech.Engine.KEY_PARAM_UTTERANCE_ID, utteranceId)
             }
-            val result = ttsInstance.speak(speechText, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
+            val result = ttsInstance.speak(cleanSpeech, TextToSpeech.QUEUE_FLUSH, params, utteranceId)
             if (result != TextToSpeech.SUCCESS) {
                 if (cont.isActive) cont.resume(false)
             }
@@ -1156,10 +1163,16 @@ class TtsManager(
             return header + audioBytes
         }
 
+        fun stripLeadingEnumeration(text: String): String {
+            return text.replaceFirst(Regex("""^\s*[0-9\u06F0-\u06F9\u0660-\u0669]+[.)]\s+"""), "").trimStart()
+        }
+
         fun cleanGermanText(text: String): String {
-            val resolved = com.example.ui.components.resolveCompletedGermanText(text)
+            val unnumbered = stripLeadingEnumeration(text)
+            val resolved = com.example.ui.components.resolveCompletedGermanText(unnumbered)
             val clean = resolved.replace(Regex("[\\u0600-\\u06FF]"), "").trim()
-            return if (clean.isNotEmpty()) clean else resolved.trim()
+            val finalClean = stripLeadingEnumeration(if (clean.isNotEmpty()) clean else resolved.trim())
+            return finalClean
         }
 
         fun collectGermanTextsFromLesson(lesson: LessonData): List<String> {

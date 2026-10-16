@@ -33,6 +33,7 @@ import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Psychology
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -45,9 +46,13 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import com.example.util.PageSearchHelper
+import com.example.util.PageSearchResultCard
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.collectAsState
@@ -118,6 +123,32 @@ fun HomeScreen(
 
     var lessonToDeleteFromCourse by remember { mutableStateOf<LessonData?>(null) }
     var lessonToDeleteFromGrammarBook by remember { mutableStateOf<LessonData?>(null) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    val isPureNumber = remember(searchQuery) { PageSearchHelper.isPureNumberQuery(searchQuery) }
+    val grammarRepo = remember { com.example.data.repository.GrammarRepository.getInstance(context) }
+    val allGrammarTopics by grammarRepo.grammarTopicsFlow.collectAsState()
+    val pageSearchResults = remember(searchQuery, isPureNumber, allLessons, grammarBookLessons, allGrammarTopics) {
+        if (isPureNumber) {
+            PageSearchHelper.searchSectionsByPage(allLessons, grammarBookLessons, allGrammarTopics, searchQuery)
+        } else emptyList()
+    }
+
+    val displayedGrammarBookLessons = remember(grammarBookLessons, searchQuery, isPureNumber) {
+        if (searchQuery.isNotBlank() && !isPureNumber) {
+            PageSearchHelper.filterLessons(grammarBookLessons, searchQuery)
+        } else {
+            grammarBookLessons
+        }
+    }
+
+    val displayedLessons = remember(allLessons, searchQuery, isPureNumber) {
+        if (searchQuery.isNotBlank() && !isPureNumber) {
+            PageSearchHelper.filterLessons(allLessons, searchQuery)
+        } else {
+            allLessons
+        }
+    }
 
     val totalWords = allLessons.sumOf { it.vocabulary.size }
     val totalLearned = allLessons.sumOf { lesson ->
@@ -253,8 +284,142 @@ fun HomeScreen(
             }
         }
 
+        // FIX X (1): Search Bar in Home Screen for all libraries & page search
+        item {
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .testTag("home_library_search_input"),
+                placeholder = {
+                    Text(
+                        text = "جستجو در درس‌ها یا شماره صفحه (مثلاً ۱۵۸)...",
+                        fontSize = 13.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "جستجو",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "پاک کردن",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
+                shape = RoundedCornerShape(16.dp),
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
+                )
+            )
+        }
+
         // ================= CONTENT SWITCHER =================
-        if (selectedLibraryTab == HomeLibraryTab.GRAMMAR_BOOK) {
+        if (isPureNumber) {
+            val cleanPage = PageSearchHelper.normalizeDigits(searchQuery).trim()
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "نتایج جستجوی صفحهٔ $cleanPage (${pageSearchResults.size} بخش یافت شد)",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            if (pageSearchResults.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Text(
+                                text = "هیچ بخشی با صفحهٔ $cleanPage در سه کتابخانه (درس‌ها، گرامر، کتاب گرامر) یافت نشد.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(pageSearchResults, key = { "${it.libraryType}_${it.parentId}_${it.sectionIndex}" }) { result ->
+                    PageSearchResultCard(
+                        result = result,
+                        onClick = {
+                            when (result.libraryType) {
+                                PageSearchHelper.LibraryType.LESSONS -> {
+                                    onContinueReading(
+                                        ReadingPosition(
+                                            libraryId = UserProgressManager.LIBRARY_LESSONS,
+                                            itemNumber = result.parentNumber,
+                                            itemId = result.parentId,
+                                            currentSectionIndex = 1,
+                                            currentTab = "متن کامل درس",
+                                            displayTitle = result.parentTitle
+                                        )
+                                    )
+                                }
+                                PageSearchHelper.LibraryType.GRAMMAR -> {
+                                    onContinueReading(
+                                        ReadingPosition(
+                                            libraryId = UserProgressManager.LIBRARY_GRAMMAR,
+                                            itemNumber = result.parentNumber,
+                                            itemId = result.parentId,
+                                            currentSectionIndex = result.sectionIndex,
+                                            currentTab = result.sectionTitle,
+                                            displayTitle = result.parentTitle
+                                        )
+                                    )
+                                }
+                                PageSearchHelper.LibraryType.GRAMMAR_BOOK -> {
+                                    onContinueReading(
+                                        ReadingPosition(
+                                            libraryId = UserProgressManager.LIBRARY_GRAMMAR_BOOK,
+                                            itemNumber = result.parentNumber,
+                                            itemId = result.parentId,
+                                            currentSectionIndex = 1,
+                                            currentTab = "متن کامل درس",
+                                            displayTitle = result.parentTitle
+                                        )
+                                    )
+                                }
+                            }
+                        }
+                    )
+                }
+            }
+        } else if (selectedLibraryTab == HomeLibraryTab.GRAMMAR_BOOK) {
             // FIX H (4): Inside «کتاب گرامر» section: action «افزودن درس گرامر (JSON)»
             item {
                 Button(
@@ -346,15 +511,40 @@ fun HomeScreen(
                         verticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
-                            text = "فهرست درس‌های کتاب گرامر (${grammarBookLessons.size} درس)",
+                            text = if (searchQuery.isNotBlank() && !isPureNumber) {
+                                "فهرست درس‌های کتاب گرامر (${displayedGrammarBookLessons.size} از ${grammarBookLessons.size} درس)"
+                            } else {
+                                "فهرست درس‌های کتاب گرامر (${grammarBookLessons.size} درس)"
+                            },
                             style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                             color = MaterialTheme.colorScheme.onBackground
                         )
                     }
                 }
 
-                // Render Grammar Book Lessons (Full Lessons in LessonSchema)
-                items(grammarBookLessons, key = { it.id }) { lesson ->
+                if (displayedGrammarBookLessons.isEmpty()) {
+                    item {
+                        Card(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(vertical = 12.dp),
+                            shape = RoundedCornerShape(18.dp),
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                            )
+                        ) {
+                            Text(
+                                text = "هیچ درسی در کتاب گرامر مطابق با «$searchQuery» یافت نشد.",
+                                modifier = Modifier.padding(24.dp),
+                                textAlign = TextAlign.Center,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                } else {
+                    // Render Grammar Book Lessons (Full Lessons in LessonSchema)
+                    items(displayedGrammarBookLessons, key = { it.id }) { lesson ->
                     val totalWordsInLesson = lesson.vocabulary.size
                     val learnedInLesson = lesson.vocabulary.count {
                         learnedWords.contains("${lesson.id}_${it.word}")
@@ -539,7 +729,8 @@ fun HomeScreen(
                     }
                 }
             }
-        } else {
+        }
+    } else {
             // ================= LESSONS TAB (Main Course) =================
             // Prominent Button: «افزودن درس جدید»
             item {
@@ -646,7 +837,11 @@ fun HomeScreen(
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     Text(
-                        text = "فهرست درس‌ها (${allLessons.size} درس)",
+                        text = if (searchQuery.isNotBlank() && !isPureNumber) {
+                            "فهرست درس‌ها (${displayedLessons.size} از ${allLessons.size} درس)"
+                        } else {
+                            "فهرست درس‌ها (${allLessons.size} درس)"
+                        },
                         style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
                         color = MaterialTheme.colorScheme.onBackground
                     )
@@ -666,8 +861,29 @@ fun HomeScreen(
                 }
             }
 
-            // Dynamic Lesson Cards (built-in + imported course lessons)
-            items(allLessons, key = { it.id }) { lesson ->
+            if (displayedLessons.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        )
+                    ) {
+                        Text(
+                            text = "هیچ درسی مطابق با «$searchQuery» یافت نشد.",
+                            modifier = Modifier.padding(24.dp),
+                            textAlign = TextAlign.Center,
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+            } else {
+                // Dynamic Lesson Cards (built-in + imported course lessons)
+                items(displayedLessons, key = { it.id }) { lesson ->
                 val totalWordsInLesson = lesson.vocabulary.size
                 val learnedInLesson = lesson.vocabulary.count {
                     learnedWords.contains("${lesson.id}_${it.word}")
@@ -830,6 +1046,7 @@ fun HomeScreen(
             }
         }
     }
+}
 
     // Dialog for Course Lesson Import
     if (showImportCourseDialog) {
@@ -1259,7 +1476,7 @@ private fun ContinueReadingCard(
                 )
                 Spacer(modifier = Modifier.width(6.dp))
                 Text(
-                    text = "ادامه از همانجا",
+                    text = "همان\u200Cجا",
                     fontWeight = FontWeight.Bold,
                     fontSize = 13.5.sp
                 )

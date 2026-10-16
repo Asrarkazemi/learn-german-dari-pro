@@ -24,9 +24,11 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.MenuBook
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.School
+import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -35,11 +37,14 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -52,14 +57,19 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalLayoutDirection
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.LayoutDirection
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.example.data.model.GrammarTopic
 import com.example.data.repository.GrammarBatchImportResult
+import com.example.data.storage.ReadingPosition
+import com.example.data.storage.UserProgressManager
 import com.example.ui.LocalImmersiveUiState
 import com.example.ui.components.ImportGrammarDialog
 import com.example.ui.theme.ErrorRed
+import com.example.util.PageSearchHelper
+import com.example.util.PageSearchResultCard
 
 @Composable
 fun GrammarScreen(
@@ -69,6 +79,7 @@ fun GrammarScreen(
     onDeleteCustomTopic: (String) -> Unit,
     onPlayAudio: (String, Boolean) -> Unit,
     onNavigateToLessons: (() -> Unit)? = null,
+    onContinueReading: ((ReadingPosition) -> Unit)? = null,
     ttsManager: com.example.util.TtsManager? = null,
     selectedTopicId: String? = null,
     onTopicSelected: ((String?) -> Unit)? = null,
@@ -80,6 +91,29 @@ fun GrammarScreen(
     var showImportDialog by remember { mutableStateOf(false) }
     var localSelectedTopicId by remember { mutableStateOf<String?>(null) }
     var topicToDelete by remember { mutableStateOf<GrammarTopic?>(null) }
+
+    var searchQuery by remember { mutableStateOf("") }
+    val isPureNumber = remember(searchQuery) { PageSearchHelper.isPureNumberQuery(searchQuery) }
+    var effectiveInitialSectionIndex by remember(initialSectionIndex) { mutableStateOf(initialSectionIndex) }
+
+    val courseRepo = remember { com.example.data.repository.UnifiedCourseRepository.getInstance(context) }
+    val grammarBookRepo = remember { com.example.data.repository.GrammarBookRepository.getInstance(context) }
+    val allLessons by courseRepo.lessonsFlow.collectAsState()
+    val grammarBookLessons by grammarBookRepo.lessonsFlow.collectAsState()
+
+    val pageSearchResults = remember(searchQuery, isPureNumber, allLessons, grammarBookLessons, allTopics) {
+        if (isPureNumber) {
+            PageSearchHelper.searchSectionsByPage(allLessons, grammarBookLessons, allTopics, searchQuery)
+        } else emptyList()
+    }
+
+    val displayedTopics = remember(allTopics, searchQuery, isPureNumber) {
+        if (searchQuery.isNotBlank() && !isPureNumber) {
+            PageSearchHelper.filterGrammarTopics(allTopics, searchQuery)
+        } else {
+            allTopics
+        }
+    }
 
     val effectiveSelectedTopicId = selectedTopicId ?: localSelectedTopicId
     val selectedTopic = allTopics.firstOrNull { it.id == effectiveSelectedTopicId }
@@ -98,7 +132,7 @@ fun GrammarScreen(
             },
             onPlayAudio = onPlayAudio,
             ttsManager = ttsManager,
-            initialSectionIndex = initialSectionIndex
+            initialSectionIndex = effectiveInitialSectionIndex
         )
         return
     }
@@ -158,184 +192,341 @@ fun GrammarScreen(
             }
         }
 
-        // Action Button: «افزودن مبحث گرامر» (JSON)
+        // Search Bar (Page Number & Topic Search)
         item {
-            Button(
-                onClick = { showImportDialog = true },
+            OutlinedTextField(
+                value = searchQuery,
+                onValueChange = { searchQuery = it },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(54.dp)
-                    .testTag("btn_add_grammar_topic"),
+                    .testTag("grammar_library_search_input"),
+                placeholder = {
+                    Text(
+                        text = "جستجو در مباحث یا شماره صفحه (مثلاً ۱۵۸)...",
+                        fontSize = 13.5.sp,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.7f)
+                    )
+                },
+                leadingIcon = {
+                    Icon(
+                        imageVector = Icons.Default.Search,
+                        contentDescription = "جستجو",
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                },
+                trailingIcon = {
+                    if (searchQuery.isNotBlank()) {
+                        IconButton(onClick = { searchQuery = "" }) {
+                            Icon(
+                                imageVector = Icons.Default.Close,
+                                contentDescription = "پاک کردن",
+                                modifier = Modifier.size(18.dp)
+                            )
+                        }
+                    }
+                },
+                singleLine = true,
                 shape = RoundedCornerShape(16.dp),
-                colors = ButtonDefaults.buttonColors(
-                    containerColor = MaterialTheme.colorScheme.secondary
+                colors = OutlinedTextFieldDefaults.colors(
+                    focusedContainerColor = MaterialTheme.colorScheme.surface,
+                    unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f),
+                    focusedBorderColor = MaterialTheme.colorScheme.primary,
+                    unfocusedBorderColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.6f)
                 )
-            ) {
-                Icon(
-                    imageVector = Icons.Default.Add,
-                    contentDescription = null,
-                    modifier = Modifier.size(24.dp)
-                )
-                Spacer(modifier = Modifier.width(8.dp))
-                Text(
-                    text = "افزودن مبحث گرامر (JSON)",
-                    fontSize = 16.sp,
-                    fontWeight = FontWeight.Bold
-                )
-            }
+            )
         }
 
-        // Topic List Header
-        item {
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "فهرست مباحث (${allTopics.size} مبحث)",
-                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                    color = MaterialTheme.colorScheme.onBackground
-                )
-
-                if (onNavigateToLessons != null) {
-                    TextButton(onClick = onNavigateToLessons) {
-                        Icon(
-                            imageVector = Icons.Default.School,
-                            contentDescription = null,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Spacer(modifier = Modifier.width(4.dp))
-                        Text("مشاهده درس‌ها", fontSize = 12.sp)
-                    }
+        if (isPureNumber) {
+            val cleanPage = PageSearchHelper.normalizeDigits(searchQuery).trim()
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "نتایج جستجوی صفحهٔ $cleanPage (${pageSearchResults.size} بخش یافت شد)",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.primary
+                    )
                 }
             }
-        }
 
-        // Grammar Topics List
-        items(allTopics, key = { it.id }) { topic ->
-            val isCustom = overrideTopicNumbers.contains(topic.number) || topic.number > 1 || !topic.id.startsWith("grammar_1")
-
-            Card(
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .testTag("grammar_topic_card_${topic.id}")
-                    .clickable {
-                        progressManager.recordStudyDay()
-                        if (onTopicSelected != null) {
-                            onTopicSelected(topic.id)
-                        } else {
-                            localSelectedTopicId = topic.id
-                        }
-                    },
-                shape = RoundedCornerShape(20.dp),
-                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-                elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
-            ) {
-                Column(modifier = Modifier.padding(18.dp)) {
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween,
-                        verticalAlignment = Alignment.Top
+            if (pageSearchResults.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        )
                     ) {
-                        Row(
-                            verticalAlignment = Alignment.CenterVertically,
-                            modifier = Modifier.weight(1f)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
-                            Box(
-                                modifier = Modifier
-                                    .size(46.dp)
-                                    .clip(CircleShape)
-                                    .background(MaterialTheme.colorScheme.primaryContainer),
-                                contentAlignment = Alignment.Center
-                            ) {
-                                Text(
-                                    text = "${topic.number}",
-                                    fontWeight = FontWeight.Bold,
-                                    fontSize = 18.sp,
-                                    color = MaterialTheme.colorScheme.onPrimaryContainer
-                                )
-                            }
-
-                            Spacer(modifier = Modifier.width(12.dp))
-
-                            Column {
-                                Text(
-                                    text = topic.titleDari,
-                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                    color = MaterialTheme.colorScheme.onSurface
-                                )
-                                Spacer(modifier = Modifier.height(2.dp))
-                                CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                    Text(
-                                        text = topic.titleGerman,
-                                        style = MaterialTheme.typography.bodySmall,
-                                        color = MaterialTheme.colorScheme.primary,
-                                        fontWeight = FontWeight.SemiBold
+                            Text(
+                                text = "هیچ بخشی با صفحهٔ $cleanPage در سه کتابخانه (درس‌ها، گرامر، کتاب گرامر) یافت نشد.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            } else {
+                items(pageSearchResults, key = { "${it.libraryType}_${it.parentId}_${it.sectionIndex}" }) { result ->
+                    PageSearchResultCard(
+                        result = result,
+                        onClick = {
+                            when (result.libraryType) {
+                                PageSearchHelper.LibraryType.GRAMMAR -> {
+                                    effectiveInitialSectionIndex = result.sectionIndex
+                                    if (onTopicSelected != null) {
+                                        onTopicSelected(result.parentId)
+                                    } else {
+                                        localSelectedTopicId = result.parentId
+                                    }
+                                }
+                                PageSearchHelper.LibraryType.LESSONS,
+                                PageSearchHelper.LibraryType.GRAMMAR_BOOK -> {
+                                    onContinueReading?.invoke(
+                                        ReadingPosition(
+                                            libraryId = if (result.libraryType == PageSearchHelper.LibraryType.LESSONS) {
+                                                com.example.data.storage.UserProgressManager.LIBRARY_LESSONS
+                                            } else {
+                                                com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR_BOOK
+                                            },
+                                            itemNumber = result.parentNumber,
+                                            itemId = result.parentId,
+                                            currentSectionIndex = 1,
+                                            currentTab = "متن کامل درس",
+                                            displayTitle = result.parentTitle
+                                        )
                                     )
                                 }
                             }
                         }
+                    )
+                }
+            }
+        } else {
+            // Action Button: «افزودن مبحث گرامر» (JSON)
+            item {
+                Button(
+                    onClick = { showImportDialog = true },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(54.dp)
+                        .testTag("btn_add_grammar_topic"),
+                    shape = RoundedCornerShape(16.dp),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = MaterialTheme.colorScheme.secondary
+                    )
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.Add,
+                        contentDescription = null,
+                        modifier = Modifier.size(24.dp)
+                    )
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = "افزودن مبحث گرامر (JSON)",
+                        fontSize = 16.sp,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+            }
 
-                        if (isCustom) {
-                            IconButton(
-                                onClick = { topicToDelete = topic },
-                                modifier = Modifier.size(36.dp)
-                            ) {
-                                Icon(
-                                    imageVector = Icons.Default.Delete,
-                                    contentDescription = "حذف مبحث سفارشی",
-                                    tint = ErrorRed.copy(alpha = 0.7f),
-                                    modifier = Modifier.size(20.dp)
-                                )
-                            }
+            // Topic List Header
+            item {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = if (searchQuery.isNotBlank()) {
+                            "نتایج جستجو (${displayedTopics.size} از ${allTopics.size} مبحث)"
+                        } else {
+                            "فهرست مباحث (${allTopics.size} مبحث)"
+                        },
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                        color = MaterialTheme.colorScheme.onBackground
+                    )
+
+                    if (onNavigateToLessons != null) {
+                        TextButton(onClick = onNavigateToLessons) {
+                            Icon(
+                                imageVector = Icons.Default.School,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Text("مشاهده درس‌ها", fontSize = 12.sp)
                         }
                     }
+                }
+            }
 
-                    Spacer(modifier = Modifier.height(14.dp))
-
-                    // Chips showing count of sections, sentences, exercises
-                    Row(
-                        modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+            if (displayedTopics.isEmpty()) {
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 12.dp),
+                        shape = RoundedCornerShape(18.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.35f)
+                        )
                     ) {
-                        Surface(
-                            shape = RoundedCornerShape(8.dp),
-                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        Column(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(24.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
                         ) {
                             Text(
-                                text = "${topic.sections.size} بخش توضیح",
-                                modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                fontSize = 11.sp,
+                                text = "هیچ مبحث گرامری مطابق با «$searchQuery» یافت نشد.",
+                                style = MaterialTheme.typography.bodyMedium,
+                                textAlign = TextAlign.Center,
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                         }
+                    }
+                }
+            } else {
+                // Grammar Topics List
+                items(displayedTopics, key = { it.id }) { topic ->
+                    val isCustom = overrideTopicNumbers.contains(topic.number) || topic.number > 1 || !topic.id.startsWith("grammar_1")
 
-                        if (topic.exampleSentences.isNotEmpty()) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .testTag("grammar_topic_card_${topic.id}")
+                            .clickable {
+                                progressManager.recordStudyDay()
+                                if (onTopicSelected != null) {
+                                    onTopicSelected(topic.id)
+                                } else {
+                                    localSelectedTopicId = topic.id
+                                }
+                            },
+                        shape = RoundedCornerShape(20.dp),
+                        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                        elevation = CardDefaults.cardElevation(defaultElevation = 2.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(18.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.Top
                             ) {
-                                Text(
-                                    text = "${topic.exampleSentences.size} جمله نمونه",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onSecondaryContainer
-                                )
+                                Row(
+                                    verticalAlignment = Alignment.CenterVertically,
+                                    modifier = Modifier.weight(1f)
+                                ) {
+                                    Box(
+                                        modifier = Modifier
+                                            .size(46.dp)
+                                            .clip(CircleShape)
+                                            .background(MaterialTheme.colorScheme.primaryContainer),
+                                        contentAlignment = Alignment.Center
+                                    ) {
+                                        Text(
+                                            text = "${topic.number}",
+                                            fontWeight = FontWeight.Bold,
+                                            fontSize = 18.sp,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer
+                                        )
+                                    }
+
+                                    Spacer(modifier = Modifier.width(12.dp))
+
+                                    Column {
+                                        Text(
+                                            text = topic.titleDari,
+                                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                            color = MaterialTheme.colorScheme.onSurface
+                                        )
+                                        Spacer(modifier = Modifier.height(2.dp))
+                                        CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                            Text(
+                                                text = topic.titleGerman,
+                                                style = MaterialTheme.typography.bodySmall,
+                                                color = MaterialTheme.colorScheme.primary,
+                                                fontWeight = FontWeight.SemiBold
+                                            )
+                                        }
+                                    }
+                                }
+
+                                if (isCustom) {
+                                    IconButton(
+                                        onClick = { topicToDelete = topic },
+                                        modifier = Modifier.size(36.dp)
+                                    ) {
+                                        Icon(
+                                            imageVector = Icons.Default.Delete,
+                                            contentDescription = "حذف مبحث سفارشی",
+                                            tint = ErrorRed.copy(alpha = 0.7f),
+                                            modifier = Modifier.size(20.dp)
+                                        )
+                                    }
+                                }
                             }
-                        }
 
-                        if (topic.exercises.isNotEmpty()) {
-                            Surface(
-                                shape = RoundedCornerShape(8.dp),
-                                color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                            Spacer(modifier = Modifier.height(14.dp))
+
+                            // Chips showing count of sections, sentences, exercises
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
                             ) {
-                                Text(
-                                    text = "${topic.exercises.size} تمرین",
-                                    modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                                    fontSize = 11.sp,
-                                    color = MaterialTheme.colorScheme.onTertiaryContainer
-                                )
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                ) {
+                                    Text(
+                                        text = "${topic.sections.size} بخش توضیح",
+                                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                        fontSize = 11.sp,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+
+                                if (topic.exampleSentences.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.6f)
+                                    ) {
+                                        Text(
+                                            text = "${topic.exampleSentences.size} جمله نمونه",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onSecondaryContainer
+                                        )
+                                    }
+                                }
+
+                                if (topic.exercises.isNotEmpty()) {
+                                    Surface(
+                                        shape = RoundedCornerShape(8.dp),
+                                        color = MaterialTheme.colorScheme.tertiaryContainer.copy(alpha = 0.6f)
+                                    ) {
+                                        Text(
+                                            text = "${topic.exercises.size} تمرین",
+                                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                                            fontSize = 11.sp,
+                                            color = MaterialTheme.colorScheme.onTertiaryContainer
+                                        )
+                                    }
+                                }
                             }
                         }
                     }
