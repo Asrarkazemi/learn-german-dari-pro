@@ -29,6 +29,7 @@ import androidx.compose.material.icons.filled.AutoAwesome
 import androidx.compose.material.icons.filled.CheckCircle
 import androidx.compose.material.icons.filled.FitnessCenter
 import androidx.compose.material.icons.filled.FormatQuote
+import androidx.compose.material.icons.filled.Headphones
 import androidx.compose.material.icons.filled.MenuBook
 import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.RecordVoiceOver
@@ -49,8 +50,10 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
 import androidx.compose.material3.Text
-import androidx.compose.material3.TopAppBarDefaults
+
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
@@ -79,6 +82,7 @@ import com.example.data.model.GrammarTopic
 import com.example.ui.LocalImmersiveUiState
 import com.example.ui.consumeTaps
 import com.example.ui.immersiveTapToggle
+import com.example.ui.components.AttachedSoundsSection
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.GrammarSectionCard
@@ -108,6 +112,10 @@ fun GrammarTopicDetailScreen(
         mutableIntStateOf(if (topic.sections.isNotEmpty()) initialSectionIndex.coerceIn(0, topic.sections.size - 1) else 0)
     }
 
+    var selectedSection by remember(topic.id, initialSectionIndex) {
+        mutableIntStateOf(if (initialSectionIndex == 4) 1 else 0)
+    }
+
     val immersiveState = LocalImmersiveUiState.current
 
     val context = LocalContext.current
@@ -115,10 +123,10 @@ fun GrammarTopicDetailScreen(
     val effectiveTts = ttsManager ?: remember { com.example.util.TtsManager(context) }
     val isSequentialPlaying by effectiveTts.isSequentialPlayingFlow.collectAsState()
 
-    LaunchedEffect(topic.id, isStepByStepMode, currentStepIndex) {
+    LaunchedEffect(topic.id, isStepByStepMode, currentStepIndex, selectedSection) {
         progressManager.recordStudyDay()
-        val currentTabTitle = if (isStepByStepMode) "بخش ${currentStepIndex + 1}" else "توضیحات و قواعد"
-        val sectionIdx = if (isStepByStepMode) currentStepIndex else 0
+        val currentTabTitle = if (selectedSection == 1) "ساوندها" else (if (isStepByStepMode) "بخش ${currentStepIndex + 1}" else "توضیحات و قواعد")
+        val sectionIdx = if (selectedSection == 1) 4 else (if (isStepByStepMode) currentStepIndex else 0)
         progressManager.saveReadingPosition(
             libraryId = com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR,
             itemNumber = topic.number,
@@ -130,83 +138,120 @@ fun GrammarTopicDetailScreen(
     }
 
     CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Rtl) {
-        LazyColumn(
-            modifier = modifier
-                .fillMaxSize()
-                .immersiveTapToggle(immersiveState)
-                .testTag("grammar_detail_lazy_column"),
-            contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 16.dp, bottom = 96.dp),
-            verticalArrangement = Arrangement.spacedBy(18.dp)
+        Column(
+            modifier = modifier.fillMaxSize()
         ) {
-                // Topic Overview Header Banner
-                item {
-                    AnimatedVisibility(visible = immersiveState.isUiVisible) {
-                        Card(
+            // Topic Overview Header Banner
+            AnimatedVisibility(visible = immersiveState.isUiVisible) {
+                Card(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(horizontal = 16.dp, vertical = 8.dp)
+                        .consumeTaps(),
+                    shape = RoundedCornerShape(20.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(16.dp),
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Box(
                             modifier = Modifier
-                                .fillMaxWidth()
-                                .consumeTaps(),
-                            shape = RoundedCornerShape(20.dp),
-                            colors = CardDefaults.cardColors(
-                                containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
-                            )
+                                .size(46.dp)
+                                .clip(CircleShape)
+                                .background(MaterialTheme.colorScheme.primary),
+                            contentAlignment = Alignment.Center
                         ) {
-                            Row(
-                                modifier = Modifier
-                                    .fillMaxWidth()
-                                    .padding(16.dp),
-                                verticalAlignment = Alignment.CenterVertically
-                            ) {
-                                Box(
-                                    modifier = Modifier
-                                        .size(46.dp)
-                                        .clip(CircleShape)
-                                        .background(MaterialTheme.colorScheme.primary),
-                                    contentAlignment = Alignment.Center
-                                ) {
-                                    Text(
-                                        text = "${topic.number}",
-                                        color = MaterialTheme.colorScheme.onPrimary,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 19.sp
-                                    )
-                                }
-                                Spacer(modifier = Modifier.width(14.dp))
-                                Column(modifier = Modifier.weight(1f)) {
-                                    Text(
-                                        text = topic.titleDari,
-                                        fontWeight = FontWeight.Bold,
-                                        fontSize = 17.sp,
-                                        color = MaterialTheme.colorScheme.onSurface
-                                    )
-                                    Spacer(modifier = Modifier.height(2.dp))
-                                    CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
-                                        Text(
-                                            text = topic.titleGerman,
-                                            fontSize = 13.5.sp,
-                                            color = MaterialTheme.colorScheme.primary,
-                                            fontWeight = FontWeight.SemiBold
-                                        )
-                                    }
-                                }
-                                IconButton(
-                                    onClick = onBack,
-                                    modifier = Modifier.testTag("btn_back_grammar_topic")
-                                ) {
-                                    Icon(
-                                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                                        contentDescription = "بازگشت",
-                                        tint = MaterialTheme.colorScheme.primary
-                                    )
-                                }
+                            Text(
+                                text = "${topic.number}",
+                                color = MaterialTheme.colorScheme.onPrimary,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 19.sp
+                            )
+                        }
+                        Spacer(modifier = Modifier.width(14.dp))
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = topic.titleDari,
+                                fontWeight = FontWeight.Bold,
+                                fontSize = 17.sp,
+                                color = MaterialTheme.colorScheme.onSurface
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            CompositionLocalProvider(LocalLayoutDirection provides LayoutDirection.Ltr) {
+                                Text(
+                                    text = topic.titleGerman,
+                                    fontSize = 13.5.sp,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    fontWeight = FontWeight.SemiBold
+                                )
                             }
+                        }
+                        IconButton(
+                            onClick = onBack,
+                            modifier = Modifier.testTag("btn_back_grammar_topic")
+                        ) {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                                contentDescription = "بازگشت",
+                                tint = MaterialTheme.colorScheme.primary
+                            )
                         }
                     }
                 }
+            }
 
-                // FIX O (4a): Sequential Audio playback for Grammar Topic
-                item {
-                    FilledTonalButton(
-                        onClick = {
+            // Tabs: 0: «توضیحات و تمرین‌ها», 1: «🎧 ساوندها»
+            TabRow(
+                selectedTabIndex = selectedSection,
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .padding(horizontal = 16.dp)
+            ) {
+                Tab(
+                    selected = selectedSection == 0,
+                    onClick = { selectedSection = 0 },
+                    text = {
+                        Text(
+                            text = "توضیحات و تمرین‌ها",
+                            fontWeight = if (selectedSection == 0) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 13.5.sp
+                        )
+                    },
+                    modifier = Modifier.testTag("tab_grammar_content")
+                )
+                Tab(
+                    selected = selectedSection == 1,
+                    onClick = { selectedSection = 1 },
+                    text = {
+                        Text(
+                            text = "🎧 ساوندها",
+                            fontWeight = if (selectedSection == 1) FontWeight.Bold else FontWeight.Normal,
+                            fontSize = 13.5.sp
+                        )
+                    },
+                    modifier = Modifier.testTag("tab_grammar_sounds")
+                )
+            }
+
+            if (selectedSection == 0) {
+                LazyColumn(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .weight(1f)
+                        .immersiveTapToggle(immersiveState)
+                        .testTag("grammar_detail_lazy_column"),
+                    contentPadding = PaddingValues(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 96.dp),
+                    verticalArrangement = Arrangement.spacedBy(18.dp)
+                ) {
+                    // FIX O (4a): Sequential Audio playback for Grammar Topic
+                    item {
+                        FilledTonalButton(
+                            onClick = {
                             if (isSequentialPlaying) {
                                 effectiveTts.stopSequentialPlayback()
                             } else {
@@ -640,9 +685,66 @@ fun GrammarTopicDetailScreen(
                     )
                 }
 
+                // Sound Section Link at end of topic
+                item {
+                    Card(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .consumeTaps(),
+                        shape = RoundedCornerShape(16.dp),
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                        ),
+                        onClick = { selectedSection = 1 }
+                    ) {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(16.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.SpaceBetween
+                        ) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    imageVector = Icons.Default.Headphones,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Text(
+                                    text = "🎧 ساوندها (فایل‌های صوتی این مبحث)",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = MaterialTheme.colorScheme.onSurface
+                                )
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Filled.ArrowForward,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.primary
+                            )
+                        }
+                    }
+                }
+
                 item {
                     Spacer(modifier = Modifier.height(24.dp))
                 }
             }
+        } else {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .weight(1f)
+            ) {
+                AttachedSoundsSection(
+                    library = com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR,
+                    itemNumber = topic.number,
+                    itemTitle = topic.titleDari
+                )
+            }
         }
     }
+}
+}
+

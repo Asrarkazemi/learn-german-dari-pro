@@ -97,6 +97,7 @@ import com.example.ui.LocalImmersiveUiState
 import com.example.ui.consumeTaps
 import com.example.ui.immersiveTapToggle
 import com.example.ui.components.ArticleBadge
+import com.example.ui.components.AttachedSoundsSection
 import com.example.ui.components.AudioSpeechButtons
 import com.example.ui.components.ExactExerciseQuestionView
 import com.example.ui.components.FlipFlashcard
@@ -140,9 +141,9 @@ fun VocabularyScreen(
     val context = LocalContext.current
     val progressManager = remember { UserProgressManager.getInstance(context) }
 
-    // 4 sections: 0: «فلشکارتها», 1: «متن کامل درس», 2: «پرسش و پاسخ», 3: «تمرینها»
+    // 5 sections: 0: «فلشکارتها», 1: «متن کامل درس», 2: «پرسش و پاسخ», 3: «تمرینها», 4: «🎧 ساوندها»
     var selectedSection by remember(selectedLessonId, initialSection) {
-        mutableIntStateOf(initialSection.coerceIn(0, 3))
+        mutableIntStateOf(initialSection.coerceIn(0, 4))
     }
 
     LaunchedEffect(selectedLessonId, selectedSection, isGrammarBook) {
@@ -154,6 +155,7 @@ fun VocabularyScreen(
                 1 -> "متن کامل درس"
                 2 -> "پرسش و پاسخ"
                 3 -> "تمرینها"
+                4 -> "ساوندها"
                 else -> "بخش $selectedSection"
             }
             val libId = if (isGrammarBook) UserProgressManager.LIBRARY_GRAMMAR_BOOK else UserProgressManager.LIBRARY_LESSONS
@@ -247,8 +249,9 @@ fun VocabularyScreen(
                 // (b) «متن کامل درس»
                 // (c) «پرسش و پاسخ»
                 // (d) «تمرینها»
-                TabRow(
+                ScrollableTabRow(
                     selectedTabIndex = selectedSection,
+                    edgePadding = 8.dp,
                     modifier = Modifier.fillMaxWidth()
                 ) {
                     Tab(
@@ -299,6 +302,18 @@ fun VocabularyScreen(
                         },
                         modifier = Modifier.testTag("tab_lesson_exercises")
                     )
+                    Tab(
+                        selected = selectedSection == 4,
+                        onClick = { selectedSection = 4 },
+                        text = {
+                            Text(
+                                text = "🎧 ساوندها",
+                                fontWeight = if (selectedSection == 4) FontWeight.Bold else FontWeight.Normal,
+                                fontSize = 13.sp
+                            )
+                        },
+                        modifier = Modifier.testTag("tab_lesson_sounds")
+                    )
                 }
             }
         }
@@ -330,6 +345,11 @@ fun VocabularyScreen(
                 3 -> LessonExercisesTab(
                     currentLesson = currentLesson,
                     onPlayAudio = onPlayAudio
+                )
+                4 -> AttachedSoundsSection(
+                    library = if (isGrammarBook) com.example.data.storage.UserProgressManager.LIBRARY_GRAMMAR_BOOK else com.example.data.storage.UserProgressManager.LIBRARY_LESSONS,
+                    itemNumber = currentLesson.number,
+                    itemTitle = currentLesson.titleDari
                 )
             }
         }

@@ -1554,5 +1554,114 @@ class ExampleRobolectricTest {
         assertEquals(7, expectedLabel.length)
         assertEquals('\u200C', expectedLabel[4])
     }
+
+    @Test
+    fun `Fix Y - per-item attached audio storage repository logic`() {
+        val context = ApplicationProvider.getApplicationContext<Context>()
+
+        // 1. Storage directory keying by library + item NUMBER
+        val dirLessons = com.example.data.repository.AttachedAudioRepository.getAudioDirectory(context, "LESSONS", 1)
+        val dirGrammar = com.example.data.repository.AttachedAudioRepository.getAudioDirectory(context, "GRAMMAR", 5)
+        val dirGrammarBook = com.example.data.repository.AttachedAudioRepository.getAudioDirectory(context, "GRAMMAR_BOOK", 2)
+
+        assertTrue("Lessons dir must be keyed by lessons/1", dirLessons.absolutePath.endsWith("lesson_audio/lessons/1"))
+        assertTrue("Grammar dir must be keyed by grammar/5", dirGrammar.absolutePath.endsWith("lesson_audio/grammar/5"))
+        assertTrue("Grammar-book dir must be keyed by grammar_book/2", dirGrammarBook.absolutePath.endsWith("lesson_audio/grammar_book/2"))
+
+        // Ensure directories exist
+        assertTrue(dirLessons.exists())
+        assertTrue(dirGrammar.exists())
+        assertTrue(dirGrammarBook.exists())
+
+        // 2. Attach / Copy sound file into app-private storage
+        val tempSourceMp3 = java.io.File(context.cacheDir, "sample_speech.mp3")
+        tempSourceMp3.writeText("MP3_AUDIO_STREAM_MOCK_DATA")
+
+        val attachedMp3 = com.example.data.repository.AttachedAudioRepository.attachSound(
+            context = context,
+            library = "LESSONS",
+            itemNumber = 1,
+            sourceFile = tempSourceMp3,
+            preferredName = "lesson_speech.mp3"
+        )
+        assertNotNull(attachedMp3)
+        assertTrue(attachedMp3.exists())
+        assertEquals("lesson_speech.mp3", attachedMp3.name)
+        assertEquals("MP3_AUDIO_STREAM_MOCK_DATA", attachedMp3.readText())
+
+        // 3. List sounds for item
+        var soundList = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 1)
+        assertEquals(1, soundList.size)
+        assertEquals("lesson_speech.mp3", soundList[0].name)
+
+        // Attach a second sound (WAV)
+        val tempSourceWav = java.io.File(context.cacheDir, "recording.wav")
+        tempSourceWav.writeText("WAV_AUDIO_STREAM_MOCK_DATA")
+
+        val attachedWav = com.example.data.repository.AttachedAudioRepository.attachSound(
+            context = context,
+            library = "LESSONS",
+            itemNumber = 1,
+            sourceFile = tempSourceWav,
+            preferredName = "a_pronunciation.wav"
+        )
+        assertNotNull(attachedWav)
+        assertTrue(attachedWav.exists())
+
+        soundList = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 1)
+        assertEquals(2, soundList.size)
+        // Verify sorted alphabetically
+        assertEquals("a_pronunciation.wav", soundList[0].name)
+        assertEquals("lesson_speech.mp3", soundList[1].name)
+
+        // Verify non-audio files are filtered out
+        val nonAudioFile = java.io.File(dirLessons, "readme.txt")
+        nonAudioFile.writeText("not an audio file")
+        soundList = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 1)
+        assertEquals(2, soundList.size)
+        assertFalse(soundList.any { it.name == "readme.txt" })
+
+        // 4. Isolation across items: item #2 must have no sounds
+        val soundListLesson2 = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 2)
+        assertTrue(soundListLesson2.isEmpty())
+
+        // 5. Duplicate filename gets unique name
+        val duplicateMp3 = com.example.data.repository.AttachedAudioRepository.attachSound(
+            context = context,
+            library = "LESSONS",
+            itemNumber = 1,
+            sourceFile = tempSourceMp3,
+            preferredName = "lesson_speech.mp3"
+        )
+        assertEquals("lesson_speech_1.mp3", duplicateMp3.name)
+        assertTrue(duplicateMp3.exists())
+
+        // 6. Delete sound by fileName
+        val deletedByName = com.example.data.repository.AttachedAudioRepository.deleteSound(
+            context = context,
+            library = "LESSONS",
+            itemNumber = 1,
+            fileName = "lesson_speech.mp3"
+        )
+        assertTrue(deletedByName)
+        assertFalse(attachedMp3.exists())
+
+        soundList = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 1)
+        assertFalse(soundList.any { it.name == "lesson_speech.mp3" })
+
+        // Delete sound by File object
+        val deletedByFile = com.example.data.repository.AttachedAudioRepository.deleteSound(attachedWav)
+        assertTrue(deletedByFile)
+        assertFalse(attachedWav.exists())
+
+        // Clean up duplicate and non-audio file
+        com.example.data.repository.AttachedAudioRepository.deleteSound(duplicateMp3)
+        nonAudioFile.delete()
+        tempSourceMp3.delete()
+        tempSourceWav.delete()
+
+        soundList = com.example.data.repository.AttachedAudioRepository.listSounds(context, "LESSONS", 1)
+        assertTrue(soundList.isEmpty())
+    }
 }
 
